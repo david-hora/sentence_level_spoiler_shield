@@ -27,6 +27,7 @@ import warnings
 WEBSITE = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(WEBSITE))
 from spoiler_shield.tfidf_features import make_features
+from spoiler_shield.model_export import create_export_stage, publish_export
 
 
 def best_f1_threshold(labels: np.ndarray, scores: np.ndarray) -> float:
@@ -97,9 +98,8 @@ def train(dataset: Path, output: Path) -> dict:
     print(f"Selected C={classifier.C}; validation F1 threshold={threshold:.8f}", flush=True)
     # The test partition is first scored after both model selection and threshold tuning.
     test_scores = classifier.predict_proba(features.transform(texts[test]).tocsr())[:, 1]
-    output.mkdir(parents=True, exist_ok=True)
-    artifact = output / "model.joblib"
-    pending = output / "model.joblib.pending"
+    stage = create_export_stage(output)
+    pending = stage / "model.joblib"
     joblib.dump({"format_version": 1, "features": features, "classifier": classifier,
                  "threshold": threshold}, pending, compress=3)
     restored = joblib.load(pending)
@@ -132,8 +132,7 @@ def train(dataset: Path, output: Path) -> dict:
                         "Training annotations contain LLM-produced labels and uncertain cases.",
                         "This is a new training run; use its own evaluation metrics."],
     }
-    pending.replace(artifact)
-    (output / "metadata.json").write_text(json.dumps(metadata, indent=2) + "\n", encoding="utf-8")
+    artifact = publish_export(output, stage, metadata)
     print(json.dumps({"artifact": str(artifact), "bytes": artifact.stat().st_size,
                       "test": metadata["test"], "seconds": metadata["training_seconds"]}, indent=2), flush=True)
     return metadata

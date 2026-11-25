@@ -4,6 +4,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from streamlit.testing.v1 import AppTest
+import streamlit as st
 from spoiler_shield.model_adapter import Prediction
 from spoiler_shield.reviews import load_reviews
 
@@ -208,3 +209,37 @@ class StreamlitAppTests(unittest.TestCase):
         self.assertEqual(app.session_state["added_reviews"], {})
         self.assertEqual(app.text_area(key=f"review_text_{MOVIE_ID}").value,
                          "Great acting. The culprit is revealed.")
+
+    def test_safe_review_shows_its_percentage(self) -> None:
+        app = self.open_movie()
+        self.open_composer(app)
+        with patch("spoiler_shield.model_adapter.TfidfSpoilerPredictor.predict",
+                   return_value=[Prediction("Lovely acting.", False, 0.123, "Below threshold")]):
+            self.submit(app, text="Lovely acting.")
+        self.assertTrue(app.success)
+        self.assertIn("No sentences hidden", self.html(app))
+        self.assertIn('>12.3%</span>', self.html(app))
+        self.assertNotIn('<details class="spoiler-mask">', self.html(app))
+
+    def test_incomplete_adapter_keeps_draft_without_incrementing_counter(self) -> None:
+        class IncompleteAdapter:
+            name = "Incomplete adapter"
+            is_mock = False
+
+            def predict(self, movie, sentences):
+                return [Prediction(text, False, 0.1, "Safe") for text in sentences]
+
+        app = self.open_movie()
+        self.open_composer(app)
+        st.cache_resource.clear()
+        try:
+            with patch("spoiler_shield.model_adapter.TfidfSpoilerPredictor", return_value=IncompleteAdapter()):
+                with self.assertLogs("spoiler_shield.analysis", level="ERROR"):
+                    self.submit(app)
+            self.assertTrue(app.error)
+            self.assertEqual(app.session_state["added_review_counter"], 0)
+            self.assertEqual(app.session_state["added_reviews"], {})
+            self.assertEqual(app.text_area(key=f"review_text_{MOVIE_ID}").value,
+                             "Great acting. The culprit is revealed.")
+        finally:
+            st.cache_resource.clear()

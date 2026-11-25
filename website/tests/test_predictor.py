@@ -76,3 +76,12 @@ class PredictorTests(unittest.TestCase):
         with patch("pathlib.Path.read_text", return_value=json.dumps(metadata)):
             with self.assertRaisesRegex(ModelLoadError, "dependencies"):
                 TfidfSpoilerPredictor()
+
+    def test_mismatched_model_id_is_rejected(self) -> None:
+        metadata = dict(self.predictor.metadata)
+        metadata["model_id"] = "tfidf-a-stale-export"
+        with patch("pathlib.Path.read_text", return_value=json.dumps(metadata)):
+            with patch("joblib.load") as deserialize:
+                with self.assertRaisesRegex(ModelLoadError, "model ID"):
+                    TfidfSpoilerPredictor()
+                deserialize.assert_not_called()

@@ -19,8 +19,8 @@ chosen from `0.1, 0.3, 1, 3, 10` using validation average precision. The thresho
 maximizes validation F1. No training, parameter selection or threshold tuning
 uses the test partition.
 
-The selected `C=1` and threshold `0.5002023450008465` reproduce model A's original
-results. This export's test PR-AUC is **0.359141**, F1 **0.400763**, precision
+The selected `C=1` and exported threshold `0.5002023450008355` reproduce model A's
+reported results. This export's test PR-AUC is **0.359141**, F1 **0.400763**, precision
 **0.323475** and recall **0.526580**. Confusion matrix, with rows as true labels
 and columns as predicted labels, ordered `[safe, spoiler]`:
 
@@ -40,7 +40,11 @@ score is not a calibrated probability of correctness. Feature contributions in
 explanations describe how the classifier reached its decision, not plot truth.
 
 Run `python scripts/train_tfidf.py` from `website/` to recreate both files using
-the pinned requirements. The website loads this trusted artifact, verifies its
-SHA-256 and scikit-learn version, and fails visibly on analysis errors rather
+the pinned requirements. New runs use unique staging directories and publish
+immutable `model-<hash>.joblib` files through one atomic `metadata.json` update.
+Older artifacts remain available for readers that already read their manifest.
+The original bundled flat `model.joblib` remains supported. The website loads
+the selected trusted artifact, verifies its SHA-256, derived export ID and
+scikit-learn version, and fails visibly on analysis errors rather
 than silently substituting a mock. Never replace it with an untrusted joblib
 file; joblib can execute code during loading.

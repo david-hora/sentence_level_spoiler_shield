@@ -337,6 +337,9 @@ def render_add_review(movie: Movie) -> None:
         with st.spinner("Analysing and protecting your review…"):
             chunks = split_preserving_formatting(review_text)
             predictor = get_predictor()
+            model_name, model_id = predictor.name, predictor.model_id
+            if not isinstance(model_name, str) or not model_name or not isinstance(model_id, str) or not model_id:
+                raise RuntimeError("The predictor must provide its model name and export ID")
             predictions = predictor.predict(movie, chunks)
             if len(predictions) != len(chunks) or any(item.text != text for item, text in zip(predictions, chunks)):
                 raise RuntimeError("Prediction results did not preserve the review text")
@@ -353,8 +356,8 @@ def render_add_review(movie: Movie) -> None:
         "rating": int(rating),
         "predictions": predictions,
         "fingerprint": fingerprint,
-        "model_name": predictor.name,
-        "model_id": predictor.model_id,
+        "model_name": model_name,
+        "model_id": model_id,
     }
     st.session_state.added_reviews.setdefault(movie.movie_id, []).insert(0, added_review)
     st.session_state[f"review_page_{movie.movie_id}"] = 1

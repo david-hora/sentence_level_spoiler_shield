@@ -23,6 +23,7 @@ class SpoilerPredictor(Protocol):
 
     name: str
     is_mock: bool
+    model_id: str
 
     def predict(self, movie: Movie, sentences: Sequence[str]) -> list[Prediction]:
         """Return one prediction per sentence, preserving text and order."""
@@ -48,9 +49,15 @@ class TfidfSpoilerPredictor:
         directory = directory or Path(__file__).resolve().parents[1] / "models" / "tfidf"
         try:
             self.metadata = json.loads((directory / "metadata.json").read_text(encoding="utf-8"))
-            artifact = directory / "model.joblib"
-            if hashlib.sha256(artifact.read_bytes()).hexdigest() != self.metadata["artifact_sha256"]:
+            expected_hash = self.metadata["artifact_sha256"]
+            filename = self.metadata.get("artifact_file", "model.joblib")
+            if filename not in ("model.joblib", f"model-{expected_hash[:16]}.joblib"):
+                raise ModelLoadError("Invalid trained model artifact filename")
+            artifact = directory / filename
+            if hashlib.sha256(artifact.read_bytes()).hexdigest() != expected_hash:
                 raise ModelLoadError("The trained model checksum does not match its metadata")
+            if self.metadata["model_id"] != "tfidf-a-" + expected_hash[:12]:
+                raise ModelLoadError("The model ID does not match its artifact checksum")
             if self.metadata["versions"]["scikit-learn"] != sklearn.__version__:
                 raise ModelLoadError("Install the model dependencies from website/requirements.txt")
             # Load only this repository's verified artifact, never a user upload.

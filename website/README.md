@@ -28,6 +28,7 @@ starting the app. The trained model and its metadata are already included in
 - Reveal human-labelled spoiler sentences independently while leaving safe text visible.
 - Add a review with a headline and 1–10 rating.
 - Analyse new reviews with the exported, trained TF-IDF classifier and add the protected result to the current browser session.
+- See a visible sentence-level spoiler percentage for both safe and hidden sentences.
 - Use a light theme with a cinema photo fading into white, clickable movie tiles, and centred review pages.
 
 Existing dataset reviews use the `is_spoiler` sentence labels in the repository's
@@ -114,11 +115,15 @@ From `website/`, after installing requirements:
 .venv\Scripts\python scripts/train_tfidf.py
 ```
 
-This writes `models/tfidf/model.joblib` and `metadata.json`, including data and
-artifact SHA-256 hashes, movie splits, dependency versions, candidate scores and
-evaluation metrics. The export is reloaded and checked against all 15,944
-held-out test scores before completion. Run training outside a live deployment
-and commit both artifact and metadata together. Keep the pinned dependencies
+This stages each run in its own directory, writes an immutable
+`models/tfidf/model-<hash>.joblib`, then atomically replaces `metadata.json` to
+select the complete export. Older artifacts are retained so interrupted or
+concurrent runs cannot break an existing reader. The initially bundled flat
+`model.joblib` is also supported. Metadata includes data/artifact SHA-256 hashes,
+movie splits, dependency versions, candidate scores and evaluation metrics.
+The export is reloaded and checked against all 15,944 held-out test scores
+before publication. Run training outside a live deployment and commit the
+selected artifact and metadata together. Keep the pinned dependencies
 when loading the trusted repository artifact; do not load user-supplied joblib files.
 
 ## Connect another model later
@@ -136,7 +141,10 @@ adapter intentionally ignores movie context, matching model A.
 
 To add another model, implement `SpoilerPredictor`, update `get_predictor()` in
 `app.py`, and update the visible model description. New reviews store the model
-name and export ID along with the predictions for provenance.
+name and export ID along with the predictions for provenance. Every adapter
+must provide `name: str`, `is_mock: bool`, `model_id: str`, and `predict(...)`.
+The model ID must identify its actual export; the TF-IDF loader derives the
+required ID from the verified artifact checksum.
 
 The movie library, dataset-review redactions, review cards, pagination, and add-review interface do not need to be rebuilt.
 

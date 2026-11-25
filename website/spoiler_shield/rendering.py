@@ -56,6 +56,17 @@ REVIEW_STYLES = """
     padding: 0 0 0.45rem;
 }
 .reveal-copy { color: #3f322e; white-space: pre-wrap; }
+.sentence-score {
+    display: inline-block;
+    background: #fff0d8;
+    border-radius: 0.3rem;
+    color: #745140;
+    font-size: 0.75rem;
+    line-height: 1.4;
+    margin-inline-start: 0.45rem;
+    padding: 0.05rem 0.3rem;
+    white-space: nowrap;
+}
 .reveal-why {
     border-top: 1px solid #e8c8af;
     color: #755d55;
@@ -67,18 +78,27 @@ REVIEW_STYLES = """
 """
 
 
-def _render_sentence(text: str, is_spoiler: bool, explanation: str, spoiler_number: int) -> str:
+def _render_sentence(text: str, is_spoiler: bool, explanation: str, spoiler_number: int,
+                     score: float | None = None) -> str:
     escaped_text = html.escape(text)
-    if not is_spoiler:
+    if not is_spoiler and (score is None or not text.strip()):
         return f'<span class="safe-sentence">{escaped_text}</span>'
     # Keep paragraph boundaries visible even while the sentence is hidden.
     leading = text[:len(text) - len(text.lstrip())]
     trailing = text[len(text.rstrip()):] if text.strip() else ""
+    badge = (
+        f'<span class="sentence-score" title="Spoiler model score; not calibrated confidence" '
+        f'aria-label="Spoiler model score {score:.1%}; not calibrated confidence">{score:.1%}</span>'
+        if score is not None else ""
+    )
+    if not is_spoiler:
+        return (html.escape(leading) + '<span class="safe-sentence">'
+                + html.escape(text.strip()) + badge + '</span>' + html.escape(trailing))
     return (
         html.escape(leading) +
         '<details class="spoiler-mask">'
         f'<summary><span class="show-label">Reveal spoiler {spoiler_number}</span>'
-        f'<span class="hide-label">Hide spoiler {spoiler_number}</span></summary>'
+        f'<span class="hide-label">Hide spoiler {spoiler_number}</span>{badge}</summary>'
         f'<div class="reveal-copy">{html.escape(text.strip())}</div>'
         f'<div class="reveal-why">{html.escape(explanation)}</div>'
         '</details>' + html.escape(trailing)
@@ -128,6 +148,7 @@ def render_protected_review(predictions: Sequence[Prediction]) -> str:
                 prediction.is_spoiler,
                 explanation,
                 spoiler_number,
+                prediction.score if prediction.text.strip() else None,
             )
         )
     parts.append("</div>")
