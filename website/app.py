@@ -11,7 +11,8 @@ from pathlib import Path
 import streamlit as st
 
 from spoiler_shield.catalog import CatalogError, Movie, load_catalog
-from spoiler_shield.model_adapter import TfidfSpoilerPredictor, Prediction
+from spoiler_shield.model_adapter import Prediction
+from spoiler_shield.distilbert_adapter import DistilbertSpoilerPredictor
 from spoiler_shield.rendering import REVIEW_STYLES, render_annotated_review, render_protected_review
 from spoiler_shield.reviews import Review, ReviewDataError, load_reviews
 from spoiler_shield.text import split_preserving_formatting
@@ -44,8 +45,8 @@ def get_reviews() -> dict[str, tuple[Review, ...]]:
 
 
 @st.cache_resource(show_spinner=False, max_entries=1)
-def get_predictor() -> TfidfSpoilerPredictor:
-    return TfidfSpoilerPredictor()
+def get_predictor() -> DistilbertSpoilerPredictor:
+    return DistilbertSpoilerPredictor()
 
 
 @st.cache_data(show_spinner=False)
@@ -287,8 +288,8 @@ def render_add_review(movie: Movie) -> None:
             )
             st.html(
                 '<div class="analysis-note"><strong>Trained spoiler detection</strong>'
-                '<span>TF-IDF analyses English sentence wording. It does not use the movie synopsis '
-                'and can miss spoilers or hide safe sentences.</span></div>'
+                '<span>DistilBERT analyses English sentences with relevant movie synopsis context. '
+                'It can miss spoilers or hide safe sentences.</span></div>'
             )
             submitted = st.form_submit_button(
                 "Add and analyse review", key="submit_review", type="primary", width="stretch",
@@ -334,7 +335,7 @@ def render_add_review(movie: Movie) -> None:
         return
 
     try:
-        with st.spinner("Analysing and protecting your review…"):
+        with st.spinner("Analysing your review. The first analysis may take a few minutes while the model loads…"):
             chunks = split_preserving_formatting(review_text)
             predictor = get_predictor()
             model_name, model_id = predictor.name, predictor.model_id

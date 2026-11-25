@@ -1,6 +1,6 @@
 # Spoiler Shield — movie review database MVP
 
-Spoiler Shield is a Streamlit movie-review database built around the team's sentence-level IMDb spoiler annotations. Users can browse 80 movies, read 3,200 reviews with spoiler sentences hidden, reveal individual spoilers, and add a new review analysed by a trained TF-IDF and logistic regression model.
+Spoiler Shield is a Streamlit movie-review database built around the team's sentence-level IMDb spoiler annotations. Users can browse 80 movies, read 3,200 reviews with spoiler sentences hidden, reveal individual spoilers, and add a new review analysed by the supplied DistilBERT model with movie synopsis context.
 
 ## Run it in VS Code
 
@@ -17,8 +17,11 @@ python -m venv .venv
 Open `http://localhost:8501` if the browser does not open automatically. Keep the terminal running while using the website; stop it with `Ctrl+C`.
 
 For an existing virtual environment, install the updated requirements before
-starting the app. The trained model and its metadata are already included in
-`models/tfidf/`; training is not needed to run the website.
+starting the app. No training is needed. The first review analysis downloads a
+verified 330 MB inference package from the hosting repository's GitHub Release;
+allow a few minutes on a cold start. It is cached on the server and subsequent
+analyses reuse the loaded models. Internet access is needed for this first download.
+Use Python 3.12–3.14 on Windows or Linux with the pinned CPU dependencies.
 
 ## Current experience
 
@@ -27,7 +30,7 @@ starting the app. The trained model and its metadata are already included in
 - Read all 40 dataset reviews for each movie, five at a time.
 - Reveal human-labelled spoiler sentences independently while leaving safe text visible.
 - Add a review with a headline and 1–10 rating.
-- Analyse new reviews with the exported, trained TF-IDF classifier and add the protected result to the current browser session.
+- Analyse new reviews with DistilBERT and relevant synopsis sentences and add the protected result to the current browser session.
 - See a visible sentence-level spoiler percentage for both safe and hidden sentences.
 - Use a light theme with a cinema photo fading into white, clickable movie tiles, and centred review pages.
 
@@ -66,6 +69,8 @@ spoiler_shield/catalog.py       Movie metadata loading and validation
 spoiler_shield/reviews.py       Annotated review loading and grouping
 spoiler_shield/text.py          Formatting-preserving sentence splitting
 spoiler_shield/model_adapter.py Trained predictor loading and sentence inference
+spoiler_shield/distilbert_adapter.py Supplied classifier and synopsis retrieval
+spoiler_shield/model_assets.py  Verified download and atomic cache publication
 spoiler_shield/tfidf_features.py Original model A feature settings
 spoiler_shield/rendering.py     Safe spoiler redaction and reveal rendering
 spoiler_shield/site.css         Website styling
@@ -73,14 +78,33 @@ assets/cinema-hero.png          Hero photograph
 data/movie_titles.json          Website's movie title index
 models/tfidf/model.joblib       Fitted word/character vectorizers and classifier
 models/tfidf/metadata.json      Provenance, versions, threshold, held-out metrics
+models/distilbert/manifest.json Active package URL, checksums and provenance
+models/distilbert/README.md     Inference settings and export limitations
 scripts/train_tfidf.py          Reproducible training and export command
 ../data/                       Existing shared team data read by the website
 tests/                           Logic, dataset, rendering, and Streamlit tests
 ```
 
-## Trained model and limitations
+## Active model and limitations
 
-`TfidfSpoilerPredictor` loads the fitted model A pipeline recreated from
+`DistilbertSpoilerPredictor` uses the supplied classifier and a pinned local
+MiniLM retriever. It feeds each English review sentence together with the three
+most relevant synopsis sentences, tagged by plot position. The supplied
+threshold is **21.15%**. Both models run on the Streamlit server's CPU; review text
+stays on that server. There is no training during use and no external inference
+API. Download or prediction failures preserve the draft without substituting a
+mock or another model. Every nonempty sentence displays its score, including
+sentences the model leaves visible.
+
+The supplied architecture matches reported model E, but the archive's threshold
+differs from the report and its training provenance is unknown. The report's
+**0.493 PR-AUC is not verified for these exact weights**. It can still miss
+spoilers and redact safe text. See `models/distilbert/README.md` for the exact
+preprocessing, original-file checksums, local smoke results and integration test.
+
+## TF-IDF baseline retained for reproducibility
+
+`TfidfSpoilerPredictor` can load the fitted model A pipeline recreated from
 `../notebooks/spoiler_models.ipynb`. It uses word unigrams/bigrams and character
 3–5-grams with a class-balanced logistic regression classifier. New review text
 is split into sentence-like chunks, scored, and redacted using the exported
@@ -136,15 +160,15 @@ predict(movie: Movie, sentences: Sequence[str]) -> list[Prediction]
 
 An adapter returns one prediction per input chunk, in the same order, preserving
 the text exactly. The `Movie` object supplies the movie metadata and synopsis,
-so a later synopsis-aware model can use the same interface. The current TF-IDF
-adapter intentionally ignores movie context, matching model A.
+and the active DistilBERT adapter uses it for synopsis retrieval. The retained
+TF-IDF baseline ignores movie context, matching model A.
 
 To add another model, implement `SpoilerPredictor`, update `get_predictor()` in
 `app.py`, and update the visible model description. New reviews store the model
 name and export ID along with the predictions for provenance. Every adapter
 must provide `name: str`, `is_mock: bool`, `model_id: str`, and `predict(...)`.
-The model ID must identify its actual export; the TF-IDF loader derives the
-required ID from the verified artifact checksum.
+The model ID must identify its actual export. The DistilBERT loader derives it
+from the verified runtime archive checksum; TF-IDF uses its artifact checksum.
 
 The movie library, dataset-review redactions, review cards, pagination, and add-review interface do not need to be rebuilt.
 
@@ -154,9 +178,11 @@ The movie library, dataset-review redactions, review cards, pagination, and add-
 .venv\Scripts\python -m unittest discover -s tests -v
 ```
 
-The tests cover dataset integrity, original held-out score parity, export loading,
+The tests cover dataset integrity, original TF-IDF held-out score parity, export loading,
 invalid model handling, text preservation, safe rendering, submission provenance,
 duplicate prevention, limits, failure retry and the main Streamlit navigation flow.
+UI tests use an offline stand-in; the opt-in DistilBERT integration test uses
+verified real weights (instructions in `models/distilbert/README.md`).
 
 ## Shared repository layout
 
@@ -170,7 +196,8 @@ sentence and annotation changes before switching the website and training to it.
 The public deployment reads `david-hora/sentence_level_spoiler_shield`, branch
 `main`, entrypoint `website/app.py`. Updates to the team's original repository
 must be synced into that fork to reach the hosted app. No secrets or external
-model API calls are needed. Newly added reviews remain session-only.
+model API calls are needed. The first analysis downloads the public model package;
+subsequent inference is local to the server. Newly added reviews remain session-only.
 
 The local `.gitignore` excludes virtual environments, caches and
 `.streamlit/secrets.toml`.
