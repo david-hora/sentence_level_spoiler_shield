@@ -36,11 +36,23 @@ Existing dataset reviews use the `is_spoiler` sentence labels in the repository'
 The repository contains:
 
 - 80 movies;
-- 3,200 reviews, with 40 reviews per film;
+- 3,200 reviews, with 40 reviews per movie;
 - 60,189 annotated sentences;
 - movie titles, metadata, summaries, and available full synopses.
 
 Reviews added through the website are intentionally stored only in Streamlit Session State. They disappear when the browser session or server ends and never modify the team's dataset. Permanent review storage can be added later if it becomes part of the assignment.
+
+Each session can store up to 100 new reviews, each at most 12,000 characters.
+Submitting the same movie, headline, rating and review text again returns the
+saved result without adding another copy or running analysis again. At the limit,
+new submissions are refused without removing existing reviews or clearing drafts.
+Successful submissions refresh the totals and return review pagination to page 1.
+Analysis failures keep the draft and log a traceback with the movie ID to the
+server console.
+
+Dataset sentence text retains any supplied whitespace, including paragraph
+breaks. Where adjacent records have no boundary whitespace, the renderer inserts
+one space. Paragraphs already removed from the source dataset cannot be restored.
 
 ## Project structure
 

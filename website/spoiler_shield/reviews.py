@@ -69,7 +69,7 @@ def load_reviews(path: Path) -> dict[str, tuple[Review, ...]]:
                 )
             sentences.append(
                 AnnotatedSentence(
-                    text=sentence["text"].strip(),
+                    text=sentence["text"],
                     is_spoiler=bool(sentence.get("is_spoiler", False)),
                 )
             )

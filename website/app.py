@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import hashlib
+import json
+import logging
 import math
 import base64
 from html import escape
@@ -20,6 +22,8 @@ DATA_ROOT = ROOT.parent / "data"
 MOVIES_PER_PAGE = 12
 REVIEWS_PER_PAGE = 5
 MAX_REVIEW_CHARACTERS = 12_000
+MAX_SESSION_REVIEWS = 100
+LOGGER = logging.getLogger("spoiler_shield.analysis")
 
 
 st.set_page_config(
@@ -52,6 +56,7 @@ def hero_background() -> str:
 
 def open_movie(movie_id: str) -> None:
     st.session_state.selected_movie_id = movie_id
+    st.session_state.detail_view = "Reviews"
 
 
 def close_movie() -> None:
@@ -213,6 +218,31 @@ def show_movie_reviews(movie_id: str) -> None:
     st.session_state[f"review_page_{movie_id}"] = 1
 
 
+def render_submission_result(movie_id: str) -> None:
+    result = st.session_state.pop("review_submission_result", None)
+    if not result or result["movie_id"] != movie_id:
+        return
+    review = next(
+        (item for item in st.session_state.added_reviews.get(movie_id, [])
+         if item["id"] == result["review_id"]),
+        None,
+    )
+    if review is None:
+        return
+    if result["duplicate"]:
+        st.info("This review is already saved. No extra copy was added.", title="Review already added")
+    else:
+        st.success("Your review is ready. You can reveal any hidden sentences below.", title="Review added")
+    render_added_review(review)
+    st.button("Read all reviews", key="read_after_adding", on_click=show_movie_reviews, args=(movie_id,))
+
+
+def submission_fingerprint(movie_id: str, summary: str, rating: int, text: str) -> str:
+    return hashlib.sha256(json.dumps(
+        [movie_id, summary.strip(), rating, text], ensure_ascii=False,
+    ).encode("utf-8")).hexdigest()
+
+
 def render_add_review(movie: Movie) -> None:
     with st.container(key="review_composer", gap="medium"):
         st.html(
@@ -250,9 +280,10 @@ def render_add_review(movie: Movie) -> None:
             submitted = st.form_submit_button(
                 "Add and analyse review", key="submit_review", type="primary", width="stretch",
             )
-        st.caption("Your review is saved for this browser session.")
+        st.caption(f"Your review is saved for this browser session. Up to {MAX_SESSION_REVIEWS} reviews per session.")
 
     if not submitted:
+        render_submission_result(movie.movie_id)
         return
 
     clean_summary = summary.strip()
@@ -264,11 +295,37 @@ def render_add_review(movie: Movie) -> None:
         st.error(f"Reviews must be {MAX_REVIEW_CHARACTERS:,} characters or fewer.", title="Review too long")
         return
 
+    # Bound the fingerprint history together with the stored reviews. Repeating
+    # a populated form, even after another submission, must not add another copy.
+    fingerprint = submission_fingerprint(movie.movie_id, clean_summary, int(rating), review_text)
+    existing = next(
+        (item for item in st.session_state.added_reviews.get(movie.movie_id, [])
+         if (item.get("fingerprint") or submission_fingerprint(
+             movie.movie_id, str(item["summary"]), int(item["rating"]),
+             "".join(prediction.text for prediction in item["predictions"]),
+         )) == fingerprint),
+        None,
+    )
+    if existing is not None:
+        st.session_state.review_submission_result = {
+            "movie_id": movie.movie_id, "review_id": existing["id"], "duplicate": True,
+        }
+        render_submission_result(movie.movie_id)
+        return
+    if sum(map(len, st.session_state.added_reviews.values())) >= MAX_SESSION_REVIEWS:
+        st.error(
+            f"This session has reached its limit of {MAX_SESSION_REVIEWS} added reviews. "
+            "Your existing reviews and the text in this form are still available.",
+            title="Session review limit reached",
+        )
+        return
+
     try:
         with st.spinner("Analysing and protecting your review…"):
             chunks = split_preserving_formatting(review_text)
             predictions = MockSpoilerPredictor().predict(movie, chunks)
     except Exception:
+        LOGGER.exception("Review analysis failed for movie %s", movie.movie_id)
         st.error("Your review could not be analysed. Your text is still in the form so you can try again.",
                  title="Analysis unavailable")
         return
@@ -279,11 +336,15 @@ def render_add_review(movie: Movie) -> None:
         "summary": clean_summary,
         "rating": int(rating),
         "predictions": predictions,
+        "fingerprint": fingerprint,
     }
     st.session_state.added_reviews.setdefault(movie.movie_id, []).insert(0, added_review)
-    st.success("Your review is ready. You can reveal any hidden sentences below.", title="Review added")
-    render_added_review(added_review)
-    st.button("Read all reviews", key="read_after_adding", on_click=show_movie_reviews, args=(movie.movie_id,))
+    st.session_state[f"review_page_{movie.movie_id}"] = 1
+    st.session_state.review_submission_result = {
+        "movie_id": movie.movie_id, "review_id": added_review["id"], "duplicate": False,
+    }
+    # Rebuild the header totals before displaying the successful result.
+    st.rerun()
 
 
 def render_movie_detail(
@@ -318,10 +379,10 @@ def render_movie_detail(
             with st.expander("Movie overview"):
                 st.write(movie.plot_summary)
 
+    st.session_state.setdefault("detail_view", "Reviews")
     view = st.segmented_control(
         "Movie section",
         ["Reviews", "Add a review"],
-        default="Reviews",
         key="detail_view",
         label_visibility="collapsed",
     )

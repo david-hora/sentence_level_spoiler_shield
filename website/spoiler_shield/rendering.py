@@ -71,23 +71,30 @@ def _render_sentence(text: str, is_spoiler: bool, explanation: str, spoiler_numb
     escaped_text = html.escape(text)
     if not is_spoiler:
         return f'<span class="safe-sentence">{escaped_text}</span>'
+    # Keep paragraph boundaries visible even while the sentence is hidden.
+    leading = text[:len(text) - len(text.lstrip())]
+    trailing = text[len(text.rstrip()):] if text.strip() else ""
     return (
+        html.escape(leading) +
         '<details class="spoiler-mask">'
         f'<summary><span class="show-label">Reveal spoiler {spoiler_number}</span>'
         f'<span class="hide-label">Hide spoiler {spoiler_number}</span></summary>'
-        f'<div class="reveal-copy">{escaped_text}</div>'
+        f'<div class="reveal-copy">{html.escape(text.strip())}</div>'
         f'<div class="reveal-why">{html.escape(explanation)}</div>'
-        '</details>'
+        '</details>' + html.escape(trailing)
     )
 
 
 def render_annotated_review(sentences: Sequence[AnnotatedSentence]) -> str:
-    """Render a dataset review using its human-approved sentence labels."""
+    """Preserve supplied spacing; infer a space only at unseparated boundaries."""
 
     parts = ['<div class="protected-review" aria-label="Spoiler-protected review">']
     spoiler_number = 0
-    for index, sentence in enumerate(sentences):
-        if index:
+    previous = ""
+    for sentence in sentences:
+        if not sentence.text:
+            continue
+        if previous and not previous[-1].isspace() and not sentence.text[0].isspace():
             parts.append(" ")
         if sentence.is_spoiler:
             spoiler_number += 1
@@ -99,6 +106,7 @@ def render_annotated_review(sentences: Sequence[AnnotatedSentence]) -> str:
                 spoiler_number,
             )
         )
+        previous = sentence.text
     parts.append("</div>")
     return "".join(parts)
 
