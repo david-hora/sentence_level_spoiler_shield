@@ -90,9 +90,11 @@ def render_annotated_review(sentences: Sequence[AnnotatedSentence]) -> str:
 
     parts = ['<div class="protected-review" aria-label="Spoiler-protected review">']
     spoiler_number = 0
-    for index, sentence in enumerate(sentences):
-        previous = sentences[index - 1].text if index else ""
-        if index and previous and sentence.text and not previous[-1].isspace() and not sentence.text[0].isspace():
+    previous = ""
+    for sentence in sentences:
+        if not sentence.text:
+            continue
+        if previous and not previous[-1].isspace() and not sentence.text[0].isspace():
             parts.append(" ")
         if sentence.is_spoiler:
             spoiler_number += 1
@@ -104,6 +106,7 @@ def render_annotated_review(sentences: Sequence[AnnotatedSentence]) -> str:
                 spoiler_number,
             )
         )
+        previous = sentence.text
     parts.append("</div>")
     return "".join(parts)
 

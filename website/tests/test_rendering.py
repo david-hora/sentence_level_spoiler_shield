@@ -91,3 +91,16 @@ class RenderingTests(unittest.TestCase):
             AnnotatedSentence("First.", False), AnnotatedSentence("Second.", False),
         ])
         self.assertIn('</span> <span class="safe-sentence">Second.', rendered)
+
+    def test_empty_records_do_not_remove_separators(self) -> None:
+        for texts, expected in [
+            (["First.", "", "", "Second."], "First. Second."),
+            (["", "First.", "", "Second.", ""], "First. Second."),
+            (["First.\n\n", "", "Second."], "First.\n\nSecond."),
+            (["First.", "", "\t", "", "Second."], "First.\tSecond."),
+        ]:
+            with self.subTest(texts=texts):
+                rendered = render_annotated_review([AnnotatedSentence(text, False) for text in texts])
+                parsed = DisclosureParser()
+                parsed.feed(rendered)
+                self.assertEqual("".join(parsed.visible), expected)

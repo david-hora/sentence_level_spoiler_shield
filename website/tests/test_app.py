@@ -57,9 +57,12 @@ class StreamlitAppTests(unittest.TestCase):
         # Streamlit can clean up an unmounted widget; seed the stale value to
         # ensure the navigation callback itself also guarantees the default.
         app.session_state["detail_view"] = "Add a review"
-        next(button for button in app.button
-             if str(button.key).startswith("open_") and button.key != f"open_{MOVIE_ID}").click().run()
+        other_movie = next(button for button in app.button
+                           if str(button.key).startswith("open_") and button.key != f"open_{MOVIE_ID}")
+        other_movie_id = other_movie.key.removeprefix("open_")
+        other_movie.click().run()
         self.assertFalse(app.exception)
+        self.assertEqual(app.session_state["selected_movie_id"], other_movie_id)
         self.assertEqual(app.session_state["detail_view"], "Reviews")
         self.assertEqual(self.html(app).count('<header class="review-heading">'), 5)
 
@@ -91,6 +94,43 @@ class StreamlitAppTests(unittest.TestCase):
         self.assertFalse(app.exception)
         self.assertEqual(self.html(app).count('<header class="review-heading">'), 5)
         self.assertIn("<h3>A new review</h3>", self.html(app))
+
+    def test_legacy_session_review_without_fingerprint_is_not_added_again(self) -> None:
+        app = self.open_movie()
+        self.open_composer(app)
+        legacy = {
+            "id": 1, "summary": "A new review", "rating": 8,
+            "predictions": [
+                Prediction("Great acting.", False, 0.1, "Safe"),
+                Prediction(" The culprit is revealed.", True, 0.9, "Mock explanation"),
+            ],
+        }
+        app.session_state["added_reviews"] = {MOVIE_ID: [legacy]}
+        app.session_state["added_review_counter"] = 1
+        with patch("spoiler_shield.model_adapter.MockSpoilerPredictor.predict") as predict:
+            self.submit(app)
+            predict.assert_not_called()
+        self.assertTrue(app.info)
+        self.assertEqual(app.session_state["added_review_counter"], 1)
+        self.assertEqual(app.session_state["added_reviews"], {MOVIE_ID: [legacy]})
+        self.assertIn("<dt>Reviews</dt><dd>41</dd>", self.html(app))
+
+    def test_submission_success_is_not_replayed_for_a_new_draft(self) -> None:
+        app = self.open_movie()
+        self.open_composer(app)
+        self.submit(app)
+        self.assertTrue(app.success)
+        app.get_by_key("detail_view").set_value("Reviews").run()
+        self.open_composer(app)
+        self.assertFalse(app.success)
+        self.assertFalse(app.info)
+        self.assertNotIn('<header class="review-heading">', self.html(app))
+        self.submit(app)
+        self.assertTrue(app.info)
+        app.run()
+        self.assertFalse(app.info)
+        self.assertFalse(app.success)
+        self.assertEqual(len(app.session_state["added_reviews"][MOVIE_ID]), 1)
 
     def test_session_limit_applies_across_movies_and_preserves_draft(self) -> None:
         app = self.open_movie()

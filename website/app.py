@@ -219,7 +219,7 @@ def show_movie_reviews(movie_id: str) -> None:
 
 
 def render_submission_result(movie_id: str) -> None:
-    result = st.session_state.get("review_submission_result")
+    result = st.session_state.pop("review_submission_result", None)
     if not result or result["movie_id"] != movie_id:
         return
     review = next(
@@ -235,6 +235,12 @@ def render_submission_result(movie_id: str) -> None:
         st.success("Your review is ready. You can reveal any hidden sentences below.", title="Review added")
     render_added_review(review)
     st.button("Read all reviews", key="read_after_adding", on_click=show_movie_reviews, args=(movie_id,))
+
+
+def submission_fingerprint(movie_id: str, summary: str, rating: int, text: str) -> str:
+    return hashlib.sha256(json.dumps(
+        [movie_id, summary.strip(), rating, text], ensure_ascii=False,
+    ).encode("utf-8")).hexdigest()
 
 
 def render_add_review(movie: Movie) -> None:
@@ -291,12 +297,13 @@ def render_add_review(movie: Movie) -> None:
 
     # Bound the fingerprint history together with the stored reviews. Repeating
     # a populated form, even after another submission, must not add another copy.
-    fingerprint = hashlib.sha256(json.dumps(
-        [movie.movie_id, clean_summary, int(rating), review_text], ensure_ascii=False,
-    ).encode("utf-8")).hexdigest()
+    fingerprint = submission_fingerprint(movie.movie_id, clean_summary, int(rating), review_text)
     existing = next(
         (item for item in st.session_state.added_reviews.get(movie.movie_id, [])
-         if item.get("fingerprint") == fingerprint),
+         if (item.get("fingerprint") or submission_fingerprint(
+             movie.movie_id, str(item["summary"]), int(item["rating"]),
+             "".join(prediction.text for prediction in item["predictions"]),
+         )) == fingerprint),
         None,
     )
     if existing is not None:
