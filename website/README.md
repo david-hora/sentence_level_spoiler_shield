@@ -1,6 +1,6 @@
 # Spoiler Shield — movie review database MVP
 
-Spoiler Shield is a Streamlit movie-review database built around the team's sentence-level IMDb spoiler annotations. Users can browse 80 movies, read 3,200 reviews with spoiler sentences hidden, reveal individual spoilers, and add a new review for mock analysis.
+Spoiler Shield is a Streamlit movie-review database built around the team's sentence-level IMDb spoiler annotations. Users can browse 80 movies, read 3,200 reviews with spoiler sentences hidden, reveal individual spoilers, and add a new review analysed by a trained TF-IDF and logistic regression model.
 
 ## Run it in VS Code
 
@@ -16,7 +16,9 @@ python -m venv .venv
 
 Open `http://localhost:8501` if the browser does not open automatically. Keep the terminal running while using the website; stop it with `Ctrl+C`.
 
-If the virtual environment already exists, only the last command is needed.
+For an existing virtual environment, install the updated requirements before
+starting the app. The trained model and its metadata are already included in
+`models/tfidf/`; training is not needed to run the website.
 
 ## Current experience
 
@@ -25,11 +27,13 @@ If the virtual environment already exists, only the last command is needed.
 - Read all 40 dataset reviews for each movie, five at a time.
 - Reveal human-labelled spoiler sentences independently while leaving safe text visible.
 - Add a review with a headline and 1–10 rating.
-- Analyse new reviews with the clearly labelled mock predictor and add the protected result to the current browser session.
+- Analyse new reviews with the exported, trained TF-IDF classifier and add the protected result to the current browser session.
+- See a visible sentence-level spoiler percentage for both safe and hidden sentences.
 - Use a light theme with a cinema photo fading into white, clickable movie tiles, and centred review pages.
 
 Existing dataset reviews use the `is_spoiler` sentence labels in the repository's
-`../data/spoiler_detection_dataset_1.3.1.json`. Only reviews entered through the website use the mock predictor.
+`../data/spoiler_detection_dataset_1.3.1.json`. Reviews entered through the website
+use the trained classifier; existing dataset annotations are not replaced.
 
 ## Data and persistence
 
@@ -61,40 +65,86 @@ app.py                           Streamlit database and interaction flow
 spoiler_shield/catalog.py       Movie metadata loading and validation
 spoiler_shield/reviews.py       Annotated review loading and grouping
 spoiler_shield/text.py          Formatting-preserving sentence splitting
-spoiler_shield/model_adapter.py Predictor contract and temporary mock
+spoiler_shield/model_adapter.py Trained predictor loading and sentence inference
+spoiler_shield/tfidf_features.py Original model A feature settings
 spoiler_shield/rendering.py     Safe spoiler redaction and reveal rendering
 spoiler_shield/site.css         Website styling
 assets/cinema-hero.png          Hero photograph
 data/movie_titles.json          Website's movie title index
+models/tfidf/model.joblib       Fitted word/character vectorizers and classifier
+models/tfidf/metadata.json      Provenance, versions, threshold, held-out metrics
+scripts/train_tfidf.py          Reproducible training and export command
 ../data/                       Existing shared team data read by the website
 tests/                           Logic, dataset, rendering, and Streamlit tests
 ```
 
-## Mock predictor limitations
+## Trained model and limitations
 
-`MockSpoilerPredictor` is deterministic and uses plot-reveal phrases, synopsis overlap, and a stable score variation. It demonstrates the add-review experience, but it:
+`TfidfSpoilerPredictor` loads the fitted model A pipeline recreated from
+`../notebooks/spoiler_models.ipynb`. It uses word unigrams/bigrams and character
+3–5-grams with a class-balanced logistic regression classifier. New review text
+is split into sentence-like chunks, scored, and redacted using the exported
+validation threshold. The model is cached once per server process and never
+trained while the app is running. Missing or incompatible artifacts produce an
+analysis error, preserve the draft, and are logged; there is no mock fallback.
 
-- has not learned from the annotated dataset;
-- can miss genuine spoilers and hide harmless sentences;
-- does not understand context, negation, character relationships, or plot chronology;
-- produces illustrative scores and explanations that must not be reported as model results.
+This recreation uses dataset 1.3.1 with 47 training movies, 12 validation movies,
+and 21 held-out test movies. Vocabulary fitting uses training sentences only;
+regularization is selected by validation PR-AUC, then the threshold by validation
+F1. Test sentences are scored only after those choices. The model is not refit
+on validation or test data. Original team results and notebooks are unchanged.
 
-## Connect the trained model later
+- Held-out PR-AUC: **0.3591**; F1: **0.4008**.
+- Spoiler precision: **0.3235**; recall: **0.5266**.
+- Threshold: **0.5002023450**; selected regularization `C=1`.
+- These are this new run's own metrics and reproduce the original model A results.
+- It was trained on English reviews. It uses sentence wording, not the selected
+  movie's synopsis, and does not verify whether a plot event actually occurs.
+- It misses spoilers and flags safe text; training annotations include LLM labels
+  and uncertain cases. Its class-weighted model scores are not calibrated confidence.
+- Reveal explanations describe the decision threshold and positive word-feature
+  contributions. They are statistical evidence, not verified plot explanations.
 
-The website depends on one stable contract in `spoiler_shield/model_adapter.py`:
+See `models/tfidf/README.md` and `metadata.json` for the full export details.
+
+## Recreate and export the model
+
+From `website/`, after installing requirements:
+
+```powershell
+.venv\Scripts\python scripts/train_tfidf.py
+```
+
+This stages each run in its own directory, writes an immutable
+`models/tfidf/model-<hash>.joblib`, then atomically replaces `metadata.json` to
+select the complete export. Older artifacts are retained so interrupted or
+concurrent runs cannot break an existing reader. The initially bundled flat
+`model.joblib` is also supported. Metadata includes data/artifact SHA-256 hashes,
+movie splits, dependency versions, candidate scores and evaluation metrics.
+The export is reloaded and checked against all 15,944 held-out test scores
+before publication. Run training outside a live deployment and commit the
+selected artifact and metadata together. Keep the pinned dependencies
+when loading the trusted repository artifact; do not load user-supplied joblib files.
+
+## Connect another model later
+
+The website retains one predictor contract in `spoiler_shield/model_adapter.py`:
 
 ```python
 predict(movie: Movie, sentences: Sequence[str]) -> list[Prediction]
 ```
 
-A real adapter returns one prediction per input sentence, in the same order. The `Movie` object supplies the selected movie ID, title, summary, and full synopsis, so both synopsis-free and synopsis-aware models can use the same website.
+An adapter returns one prediction per input chunk, in the same order, preserving
+the text exactly. The `Movie` object supplies the movie metadata and synopsis,
+so a later synopsis-aware model can use the same interface. The current TF-IDF
+adapter intentionally ignores movie context, matching model A.
 
-When the trained model arrives:
-
-1. Add a class such as `TrainedModelPredictor` that follows `SpoilerPredictor`.
-2. Load the exported model and its tokenizer or vectorizer inside that adapter.
-3. Replace `MockSpoilerPredictor()` in `app.py` with the real adapter.
-4. Update the prototype notice only after genuine model predictions are being used.
+To add another model, implement `SpoilerPredictor`, update `get_predictor()` in
+`app.py`, and update the visible model description. New reviews store the model
+name and export ID along with the predictions for provenance. Every adapter
+must provide `name: str`, `is_mock: bool`, `model_id: str`, and `predict(...)`.
+The model ID must identify its actual export; the TF-IDF loader derives the
+required ID from the verified artifact checksum.
 
 The movie library, dataset-review redactions, review cards, pagination, and add-review interface do not need to be rebuilt.
 
@@ -104,7 +154,9 @@ The movie library, dataset-review redactions, review cards, pagination, and add-
 .venv\Scripts\python -m unittest discover -s tests -v
 ```
 
-The tests cover the complete 3,200-review dataset, catalog integrity, exact text preservation, safe rendering, deterministic mock output, and the main Streamlit navigation flow.
+The tests cover dataset integrity, original held-out score parity, export loading,
+invalid model handling, text preservation, safe rendering, submission provenance,
+duplicate prevention, limits, failure retry and the main Streamlit navigation flow.
 
 ## Shared repository layout
 
@@ -113,8 +165,12 @@ The website's source, theme, assets, dependencies and tests all live inside
 repository's root `data/` directory. It does not write to the shared dataset.
 
 This website uses dataset 1.3.1. A later dataset version should be checked for
-sentence and annotation changes before switching the website to it. The trained
-model is still pending and new-review analysis uses the labelled mock predictor.
+sentence and annotation changes before switching the website and training to it.
+
+The public deployment reads `david-hora/sentence_level_spoiler_shield`, branch
+`main`, entrypoint `website/app.py`. Updates to the team's original repository
+must be synced into that fork to reach the hosted app. No secrets or external
+model API calls are needed. Newly added reviews remain session-only.
 
 The local `.gitignore` excludes virtual environments, caches and
 `.streamlit/secrets.toml`.

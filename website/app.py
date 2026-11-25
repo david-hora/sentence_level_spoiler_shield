@@ -11,7 +11,7 @@ from pathlib import Path
 import streamlit as st
 
 from spoiler_shield.catalog import CatalogError, Movie, load_catalog
-from spoiler_shield.model_adapter import MockSpoilerPredictor, Prediction
+from spoiler_shield.model_adapter import TfidfSpoilerPredictor, Prediction
 from spoiler_shield.rendering import REVIEW_STYLES, render_annotated_review, render_protected_review
 from spoiler_shield.reviews import Review, ReviewDataError, load_reviews
 from spoiler_shield.text import split_preserving_formatting
@@ -41,6 +41,11 @@ def get_movies() -> list[Movie]:
 @st.cache_data(show_spinner=False)
 def get_reviews() -> dict[str, tuple[Review, ...]]:
     return load_reviews(DATA_ROOT / "spoiler_detection_dataset_1.3.1.json")
+
+
+@st.cache_resource(show_spinner=False, max_entries=1)
+def get_predictor() -> TfidfSpoilerPredictor:
+    return TfidfSpoilerPredictor()
 
 
 @st.cache_data(show_spinner=False)
@@ -99,12 +104,19 @@ def render_dataset_review(review: Review) -> None:
         st.html(render_annotated_review(review.sentences))
 
 
+def added_spoiler_count(review: dict[str, object]) -> int:
+    predictions = review["predictions"]
+    assert isinstance(predictions, list)
+    return sum(item.is_spoiler for item in predictions if isinstance(item, Prediction))
+
+
 def render_added_review(review: dict[str, object]) -> None:
     predictions = review["predictions"]
     assert isinstance(predictions, list)
-    spoiler_count = sum(item.is_spoiler for item in predictions if isinstance(item, Prediction))
+    spoiler_count = added_spoiler_count(review)
     with st.container(key=f"review_card_added_{review['id']}", gap="small"):
-        render_review_header(str(review["summary"]), "Your review (mock prediction)", int(review["rating"]), spoiler_count)
+        model_name = str(review.get("model_name", "earlier session analysis"))
+        render_review_header(str(review["summary"]), f"Your review ({model_name})", int(str(review["rating"])), spoiler_count)
         st.html(render_protected_review(predictions))
 
 
@@ -116,7 +128,7 @@ def choose_review_movie(movies: list[Movie]) -> None:
         format_func=lambda item: f"{item.title} ({item.year})" if item.year else item.title,
         placeholder="Search for a movie", key="review_movie_choice",
     )
-    if st.button("Write review", key="picker_write_review", type="primary", disabled=movie is None, width="stretch"):
+    if st.button("Write review", key="picker_write_review", type="primary", disabled=movie is None, width="stretch") and movie is not None:
         st.session_state.selected_movie_id = movie.movie_id
         st.session_state.detail_view = "Add a review"
         st.rerun()
@@ -274,8 +286,9 @@ def render_add_review(movie: Movie) -> None:
                 help="Spacing and line breaks are preserved. Up to 12,000 characters.",
             )
             st.html(
-                '<div class="analysis-note"><strong>Demo analysis</strong>'
-                '<span>New reviews use a rule-based mock predictor. It can miss spoilers or hide safe sentences.</span></div>'
+                '<div class="analysis-note"><strong>Trained spoiler detection</strong>'
+                '<span>TF-IDF analyses English sentence wording. It does not use the movie synopsis '
+                'and can miss spoilers or hide safe sentences.</span></div>'
             )
             submitted = st.form_submit_button(
                 "Add and analyse review", key="submit_review", type="primary", width="stretch",
@@ -323,7 +336,13 @@ def render_add_review(movie: Movie) -> None:
     try:
         with st.spinner("Analysing and protecting your review…"):
             chunks = split_preserving_formatting(review_text)
-            predictions = MockSpoilerPredictor().predict(movie, chunks)
+            predictor = get_predictor()
+            model_name, model_id = predictor.name, predictor.model_id
+            if not isinstance(model_name, str) or not model_name or not isinstance(model_id, str) or not model_id:
+                raise RuntimeError("The predictor must provide its model name and export ID")
+            predictions = predictor.predict(movie, chunks)
+            if len(predictions) != len(chunks) or any(item.text != text for item, text in zip(predictions, chunks)):
+                raise RuntimeError("Prediction results did not preserve the review text")
     except Exception:
         LOGGER.exception("Review analysis failed for movie %s", movie.movie_id)
         st.error("Your review could not be analysed. Your text is still in the form so you can try again.",
@@ -337,6 +356,8 @@ def render_add_review(movie: Movie) -> None:
         "rating": int(rating),
         "predictions": predictions,
         "fingerprint": fingerprint,
+        "model_name": model_name,
+        "model_id": model_id,
     }
     st.session_state.added_reviews.setdefault(movie.movie_id, []).insert(0, added_review)
     st.session_state[f"review_page_{movie.movie_id}"] = 1
@@ -354,11 +375,7 @@ def render_movie_detail(
 ) -> None:
     review_count = len(dataset_reviews) + len(added_reviews)
     hidden_count = sum(review.spoiler_count for review in dataset_reviews)
-    hidden_count += sum(
-        prediction.is_spoiler
-        for review in added_reviews
-        for prediction in review["predictions"]
-    )
+    hidden_count += sum(added_spoiler_count(review) for review in added_reviews)
     with st.container(key="film_header", gap="medium"):
         st.title(movie.title, anchor=False)
         st.html(

@@ -1,40 +1,13 @@
 from __future__ import annotations
 
 import hashlib
-import re
+import json
+import math
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Protocol, Sequence
 
 from spoiler_shield.catalog import Movie
-
-
-_WORD = re.compile(r"[A-Za-zÀ-ÖØ-öø-ÿ0-9']+")
-_STOP_WORDS = {
-    "about", "after", "again", "also", "because", "before", "being", "between",
-    "could", "does", "from", "have", "into", "just", "more", "movie", "really",
-    "some", "than", "that", "their", "there", "these", "they", "this", "through",
-    "very", "what", "when", "where", "which", "while", "with", "would", "your",
-}
-_CUES = {
-    "turns out": 0.30,
-    "is the killer": 0.34,
-    "was the killer": 0.34,
-    "final scene": 0.24,
-    "at the end": 0.24,
-    "the ending": 0.22,
-    "reveals": 0.20,
-    "revealed": 0.20,
-    "actually": 0.10,
-    "betrays": 0.24,
-    "sacrifices": 0.23,
-    "dies": 0.29,
-    "killed": 0.27,
-    "killer": 0.25,
-    "murderer": 0.27,
-    "survives": 0.22,
-    "defeats": 0.20,
-    "identity": 0.18,
-}
 
 
 @dataclass(frozen=True)
@@ -46,59 +19,95 @@ class Prediction:
 
 
 class SpoilerPredictor(Protocol):
-    """Stable boundary between the website and any prediction implementation."""
+    """Boundary for sentence-only and future synopsis-aware predictors."""
 
     name: str
     is_mock: bool
+    model_id: str
 
     def predict(self, movie: Movie, sentences: Sequence[str]) -> list[Prediction]:
-        """Return exactly one prediction for each input sentence, in the same order."""
+        """Return one prediction per sentence, preserving text and order."""
 
 
-class MockSpoilerPredictor:
-    """Deterministic UI placeholder. This is not a trained classifier."""
+class ModelLoadError(RuntimeError):
+    """The bundled trained model is missing, incompatible or corrupt."""
 
-    name = "Rule-based mock predictor"
-    is_mock = True
-    threshold = 0.56
+
+class TfidfSpoilerPredictor:
+    """Fitted word/character TF-IDF and logistic regression; no synopsis input."""
+
+    name = "TF-IDF + logistic regression"
+    is_mock = False
+
+    def __init__(self, directory: Path | None = None) -> None:
+        import joblib
+        import numpy as np
+        import sklearn
+        from sklearn.linear_model import LogisticRegression
+        from sklearn.pipeline import FeatureUnion
+
+        directory = directory or Path(__file__).resolve().parents[1] / "models" / "tfidf"
+        try:
+            self.metadata = json.loads((directory / "metadata.json").read_text(encoding="utf-8"))
+            expected_hash = self.metadata["artifact_sha256"]
+            filename = self.metadata.get("artifact_file", "model.joblib")
+            if filename not in ("model.joblib", f"model-{expected_hash[:16]}.joblib"):
+                raise ModelLoadError("Invalid trained model artifact filename")
+            artifact = directory / filename
+            if hashlib.sha256(artifact.read_bytes()).hexdigest() != expected_hash:
+                raise ModelLoadError("The trained model checksum does not match its metadata")
+            if self.metadata["model_id"] != "tfidf-a-" + expected_hash[:12]:
+                raise ModelLoadError("The model ID does not match its artifact checksum")
+            if self.metadata["versions"]["scikit-learn"] != sklearn.__version__:
+                raise ModelLoadError("Install the model dependencies from website/requirements.txt")
+            # Load only this repository's verified artifact, never a user upload.
+            bundle = joblib.load(artifact)
+            if bundle["format_version"] != 1 or self.metadata["format_version"] != 1:
+                raise ModelLoadError("Unsupported trained model format")
+            self.features = bundle["features"]
+            self.classifier = bundle["classifier"]
+            self.threshold = float(bundle["threshold"])
+            if not isinstance(self.features, FeatureUnion) or not isinstance(self.classifier, LogisticRegression):
+                raise ModelLoadError("Unexpected trained model components")
+            if self.classifier.classes_.tolist() != [0, 1]:
+                raise ModelLoadError("Unexpected spoiler class labels")
+            if not math.isfinite(self.threshold) or not 0 <= self.threshold <= 1:
+                raise ModelLoadError("Invalid spoiler threshold")
+            if self.threshold != self.metadata["threshold"]:
+                raise ModelLoadError("Model and metadata thresholds differ")
+            self.word_names = self.features.transformer_list[0][1].get_feature_names_out()
+            self.word_count = len(self.word_names)
+            self.model_id = self.metadata["model_id"]
+            self._numpy = np
+        except ModelLoadError:
+            raise
+        except Exception as exc:
+            raise ModelLoadError("The trained TF-IDF model could not be loaded") from exc
 
     def predict(self, movie: Movie, sentences: Sequence[str]) -> list[Prediction]:
-        plot_words = self._meaningful_words(f"{movie.plot_summary} {movie.synopsis}")
-        results = [self._predict_one(movie, sentence, plot_words) for sentence in sentences]
-        if len(results) != len(sentences):
-            raise RuntimeError("Predictor returned a different number of results than sentences")
-        return results
-
-    def _predict_one(self, movie: Movie, sentence: str, plot_words: set[str]) -> Prediction:
-        clean = sentence.strip()
-        lower = clean.casefold()
-        sentence_words = self._meaningful_words(clean)
-        overlap = len(sentence_words & plot_words) / max(1, len(sentence_words))
-        cue_matches = [(cue, weight) for cue, weight in _CUES.items() if cue in lower]
-        cue_score = min(0.48, sum(weight for _, weight in cue_matches))
-        overlap_score = min(0.24, overlap * 0.55)
-        # A stable, small variation makes the demo less uniform without randomness.
-        digest = hashlib.sha256(f"{movie.movie_id}\0{clean}".encode("utf-8")).digest()
-        jitter = (digest[0] / 255) * 0.08
-        score = min(0.97, 0.08 + cue_score + overlap_score + jitter)
-        is_spoiler = bool(clean) and score >= self.threshold
-
-        if is_spoiler:
-            reasons: list[str] = []
-            if cue_matches:
-                cues = ", ".join(f'“{cue}”' for cue, _ in cue_matches[:2])
-                reasons.append(f"contains plot-reveal wording such as {cues}")
-            if overlap >= 0.18:
-                reasons.append("shares several specific terms with the selected movie's synopsis")
-            explanation = "Mock flag: " + " and ".join(reasons or ["matched the demonstration heuristic"] ) + "."
-        else:
-            explanation = "Mock result: no strong plot-reveal pattern was found."
-        return Prediction(text=sentence, is_spoiler=is_spoiler, score=round(score, 3), explanation=explanation)
-
-    @staticmethod
-    def _meaningful_words(text: str) -> set[str]:
-        return {
-            word.casefold()
-            for word in _WORD.findall(text)
-            if len(word) >= 4 and word.casefold() not in _STOP_WORDS
-        }
+        if not sentences:
+            return []
+        matrix = self.features.transform([text.strip() for text in sentences]).tocsr()
+        scores = self.classifier.predict_proba(matrix)[:, 1]
+        if len(scores) != len(sentences) or not self._numpy.isfinite(scores).all():
+            raise RuntimeError("The classifier returned invalid prediction scores")
+        predictions = []
+        for index, (text, raw_score) in enumerate(zip(sentences, scores)):
+            score = float(raw_score) if text.strip() else 0.0
+            is_spoiler = bool(text.strip()) and score >= self.threshold
+            explanation = "The trained text classifier scored this sentence below its spoiler threshold."
+            if is_spoiler:
+                contributions = matrix[index, :self.word_count].multiply(
+                    self.classifier.coef_[0, :self.word_count],
+                ).tocsr()
+                ranked = sorted(zip(contributions.indices, contributions.data), key=lambda pair: -pair[1])
+                words = [str(self.word_names[column]) for column, contribution in ranked if contribution > 0][:3]
+                explanation = (
+                    f"The trained text classifier exceeded its spoiler threshold ({self.threshold:.1%}). "
+                    "It recognises wording associated with spoiler-labelled sentences."
+                )
+                if words:
+                    explanation += " Positive word features: " + ", ".join(f'“{word}”' for word in words) + "."
+                explanation += " This describes the model's evidence; it does not verify the movie's plot."
+            predictions.append(Prediction(text, is_spoiler, score, explanation))
+        return predictions

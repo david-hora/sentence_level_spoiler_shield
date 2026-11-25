@@ -1,0 +1,203 @@
+{
+  "format_version": 1,
+  "model_id": "tfidf-a-5e57d3d001b5",
+  "name": "TF-IDF + logistic regression",
+  "language": "English",
+  "created_at": "2026-11-25T19:55:19.469838+00:00",
+  "source_notebook": "notebooks/spoiler_models.ipynb",
+  "source_model": "A",
+  "dataset": "spoiler_detection_dataset_1.3.1.json",
+  "dataset_sha256": "ce1f45ff6d91e9643698af6e07a8ef9e07cb2a3fe4aaefe73897c630ed66d0ec",
+  "artifact_sha256": "5e57d3d001b5743e7dc39b0fa276a5fc1dc6806a3a9abd10551c75c1fe565330",
+  "seed": 42,
+  "versions": {
+    "python": "3.14.4",
+    "scikit-learn": "1.9.1",
+    "numpy": "2.5.5",
+    "scipy": "1.18.1",
+    "joblib": "1.6.0"
+  },
+  "features": {
+    "word": 71888,
+    "char": 70766
+  },
+  "partitions": {
+    "train": {
+      "sentences": 34756,
+      "spoilers": 2638,
+      "movie_ids": [
+        "tt0206634",
+        "tt0348150",
+        "tt0363771",
+        "tt0371724",
+        "tt0376994",
+        "tt0381061",
+        "tt0384537",
+        "tt0388795",
+        "tt0413300",
+        "tt0435625",
+        "tt0450278",
+        "tt0457430",
+        "tt0482571",
+        "tt0816692",
+        "tt0884328",
+        "tt0903624",
+        "tt0910970",
+        "tt0938283",
+        "tt1060277",
+        "tt1065073",
+        "tt1130884",
+        "tt1136608",
+        "tt1259571",
+        "tt1371111",
+        "tt1392190",
+        "tt1396484",
+        "tt1431045",
+        "tt1446714",
+        "tt1457767",
+        "tt1601913",
+        "tt1663202",
+        "tt1663662",
+        "tt1856101",
+        "tt2109248",
+        "tt2179136",
+        "tt2180411",
+        "tt2250912",
+        "tt2267998",
+        "tt2310332",
+        "tt2527336",
+        "tt2562232",
+        "tt2582802",
+        "tt2911666",
+        "tt3315342",
+        "tt3748528",
+        "tt3783958",
+        "tt5013056"
+      ]
+    },
+    "validation": {
+      "sentences": 9489,
+      "spoilers": 1042,
+      "movie_ids": [
+        "tt0121766",
+        "tt0360717",
+        "tt0367882",
+        "tt0414387",
+        "tt0434409",
+        "tt1074638",
+        "tt1454468",
+        "tt2294629",
+        "tt2488496",
+        "tt2543164",
+        "tt3235888",
+        "tt3896198"
+      ]
+    },
+    "test": {
+      "sentences": 15944,
+      "spoilers": 997,
+      "movie_ids": [
+        "tt0050083",
+        "tt0068646",
+        "tt0108052",
+        "tt0110912",
+        "tt0111161",
+        "tt0137523",
+        "tt0167260",
+        "tt0369610",
+        "tt0379786",
+        "tt0383574",
+        "tt0451279",
+        "tt0468569",
+        "tt0499549",
+        "tt0803096",
+        "tt0974015",
+        "tt1289401",
+        "tt1355644",
+        "tt1386697",
+        "tt2322441",
+        "tt2975590",
+        "tt5109784"
+      ]
+    }
+  },
+  "candidates": [
+    {
+      "C": 0.1,
+      "validation_pr_auc": 0.41602028688063325,
+      "iterations": 9
+    },
+    {
+      "C": 0.3,
+      "validation_pr_auc": 0.42678735841955917,
+      "iterations": 28
+    },
+    {
+      "C": 1,
+      "validation_pr_auc": 0.4279772674448674,
+      "iterations": 18
+    },
+    {
+      "C": 3,
+      "validation_pr_auc": 0.41589779783735475,
+      "iterations": 23
+    },
+    {
+      "C": 10,
+      "validation_pr_auc": 0.4007869611781677,
+      "iterations": 36
+    }
+  ],
+  "selected_C": 1,
+  "threshold": 0.5002023450008355,
+  "threshold_selection": "Maximum F1 on validation movies only",
+  "validation": {
+    "pr_auc": 0.4279772674448674,
+    "roc_auc": 0.8464061903884376,
+    "precision": 0.43967611336032386,
+    "recall": 0.5211132437619962,
+    "f1": 0.4769433465085639,
+    "confusion_matrix": [
+      [
+        7755,
+        692
+      ],
+      [
+        499,
+        543
+      ]
+    ],
+    "sentences": 9489,
+    "spoilers": 1042
+  },
+  "test": {
+    "pr_auc": 0.359141294668814,
+    "roc_auc": 0.8735565094963758,
+    "precision": 0.3234750462107209,
+    "recall": 0.526579739217653,
+    "f1": 0.40076335877862596,
+    "confusion_matrix": [
+      [
+        13849,
+        1098
+      ],
+      [
+        472,
+        525
+      ]
+    ],
+    "sentences": 15944,
+    "spoilers": 997
+  },
+  "export_verification": {
+    "sentences": 15944,
+    "max_score_difference": 0.0
+  },
+  "training_seconds": 38.76,
+  "limitations": [
+    "Sentence wording only; no synopsis or movie-specific context.",
+    "Class-weighted scores are not calibrated confidence estimates.",
+    "Training annotations contain LLM-produced labels and uncertain cases.",
+    "This is a new training run; use its own evaluation metrics."
+  ]
+}

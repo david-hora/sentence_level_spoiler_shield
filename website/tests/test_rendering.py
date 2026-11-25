@@ -63,6 +63,24 @@ class RenderingTests(unittest.TestCase):
         self.assertEqual(rendered.count('<details class="spoiler-mask">'), 2)
         self.assertIn("Mock &lt;reason&gt;", rendered)
         self.assert_spoilers_are_closed(rendered, ["A dies.", "B survives."])
+        parsed = DisclosureParser()
+        parsed.feed(rendered)
+        for percentage in ["10.0%", "80.0%", "90.0%"]:
+            self.assertIn(percentage, "".join(parsed.visible))
+
+    def test_safe_sentences_always_show_visible_percentages(self) -> None:
+        rendered = render_protected_review([
+            Prediction("Great acting.\n\n", False, 0.023, "Below threshold"),
+            Prediction("Excellent score.", False, 0.114, "Below threshold"),
+            Prediction("\n\n", False, 0.0, "Empty chunk"),
+        ])
+        parsed = DisclosureParser()
+        parsed.feed(rendered)
+        self.assertFalse(parsed.disclosures)
+        self.assertIn("2.3%", "".join(parsed.visible))
+        self.assertIn("11.4%", "".join(parsed.visible))
+        self.assertEqual(rendered.count('class="sentence-score"'), 2)
+        self.assertIn('</span></span>\n\n<span class="safe-sentence">', rendered)
 
     def test_annotated_renderer_hides_only_labelled_sentences(self) -> None:
         rendered = render_annotated_review(
@@ -75,6 +93,7 @@ class RenderingTests(unittest.TestCase):
         self.assertIn("Great acting.", rendered)
         self.assertIn("labelled as a spoiler", rendered)
         self.assert_spoilers_are_closed(rendered, ["The culprit is revealed."])
+        self.assertNotIn('class="sentence-score"', rendered)
 
     def test_annotated_paragraph_boundaries_stay_outside_masks(self) -> None:
         rendered = render_annotated_review([
