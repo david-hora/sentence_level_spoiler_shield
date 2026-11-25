@@ -1,0 +1,80 @@
+{
+  "format_version": 1,
+  "model_id": "distilbert-synopsis-8141afd2ce53",
+  "archive_url": "https://github.com/david-hora/sentence_level_spoiler_shield/releases/download/distilbert-synopsis-2026-11-25/spoiler-shield-runtime.zip",
+  "archive_sha256": "8141afd2ce53164cca2300c63231c3f085e72cc9424b06ee7cd8ffea7e80d286",
+  "archive_size": 330299609,
+  "supplied_classifier_zip_sha256": "ef24ce49eab8d89c2afd851e8a4fc3c58717964d03dd65f60da27b612425c04d",
+  "retriever": {
+    "repository": "sentence-transformers/all-MiniLM-L6-v2",
+    "revision": "1110a243fdf4706b3f48f1d95db1a4f5529b4d41"
+  },
+  "training_provenance": "Not supplied. Same architecture/input design as reported model E; exact training run and dataset version unverified.",
+  "threshold": 0.2114982306957245,
+  "files": {
+    "classifier/config.json": {
+      "sha256": "ed9c71ae6cfc7a0105f07dda222d47e40bcd46b8c5a727f1b4f9b6ed977f3aa5",
+      "size": 593
+    },
+    "classifier/model.safetensors": {
+      "sha256": "1177e8eae29d427ee0e1b84e62d406651513ae2a4eff0a8faaa273b4da2b815d",
+      "size": 267832560
+    },
+    "classifier/spoiler_shield_config.json": {
+      "sha256": "d95517ae8f46581dc0fa0f5164bf37252e283165a2a4ba1c4fe85ff8f51ee7c2",
+      "size": 407
+    },
+    "classifier/tokenizer.json": {
+      "sha256": "851ca67100d372ca3ae031a6abd168f53489eebfd7d89523f35c5c9b4d372c3c",
+      "size": 711649
+    },
+    "classifier/tokenizer_config.json": {
+      "sha256": "e1c2a61a99bda00f6c55303a210b30e2f92dcf8b555e215812e2eb583e177ffd",
+      "size": 351
+    },
+    "retriever/1_Pooling/config.json": {
+      "sha256": "4be450dde3b0273bb9787637cfbd28fe04a7ba6ab9d36ac48e92b11e350ffc23",
+      "size": 190
+    },
+    "retriever/README.md": {
+      "sha256": "dcd602d2fd35c203a247304a06fec6654a12f7941b739f9221a064fe8dc3b7f0",
+      "size": 10502
+    },
+    "retriever/config.json": {
+      "sha256": "953f9c0d463486b10a6871cc2fd59f223b2c70184f49815e7efbcab5d8908b41",
+      "size": 612
+    },
+    "retriever/config_sentence_transformers.json": {
+      "sha256": "061ca9d39661d6c6d6de5ba27f79a1cd5770ea247f8d46412a68a498dc5ac9f3",
+      "size": 116
+    },
+    "retriever/model.safetensors": {
+      "sha256": "53aa51172d142c89d9012cce15ae4d6cc0ca6895895114379cacb4fab128d9db",
+      "size": 90868376
+    },
+    "retriever/modules.json": {
+      "sha256": "84e40c8e006c9b1d6c122e02cba9b02458120b5fb0c87b746c41e0207cf642cf",
+      "size": 349
+    },
+    "retriever/sentence_bert_config.json": {
+      "sha256": "fc1993fde0a95c24ec6c022539d41cf6e2f7c9721e5415d6fb6897472a9cd4b7",
+      "size": 53
+    },
+    "retriever/special_tokens_map.json": {
+      "sha256": "303df45a03609e4ead04bc3dc1536d0ab19b5358db685b6f3da123d05ec200e3",
+      "size": 112
+    },
+    "retriever/tokenizer.json": {
+      "sha256": "be50c3628f2bf5bb5e3a7f17b1f74611b2561a3a27eeab05e5aa30f411572037",
+      "size": 466247
+    },
+    "retriever/tokenizer_config.json": {
+      "sha256": "acb92769e8195aabd29b7b2137a9e6d6e25c476a4f15aa4355c233426c61576b",
+      "size": 350
+    },
+    "retriever/vocab.txt": {
+      "sha256": "07eced375cec144d27c900241f3e339478dec958f92fddbc551f295c992038a3",
+      "size": 231508
+    }
+  }
+}

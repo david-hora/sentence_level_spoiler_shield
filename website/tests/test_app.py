@@ -13,7 +13,24 @@ ROOT = Path(__file__).resolve().parents[1]
 MOVIE_ID = "tt0050083"
 
 
+class FakePredictor:
+    """Keep UI tests offline; the supplied weights have a separate integration test."""
+    name = "DistilBERT + movie synopsis"
+    is_mock = False
+    model_id = "distilbert-synopsis-ui-provenance-sentinel-49281"
+
+    def predict(self, movie, sentences):
+        return [Prediction(text, False, 0.1, "UI test prediction") for text in sentences]
+
+
 class StreamlitAppTests(unittest.TestCase):
+    def setUp(self) -> None:
+        st.cache_resource.clear()
+        mock = patch("spoiler_shield.distilbert_adapter.DistilbertSpoilerPredictor", FakePredictor)
+        mock.start()
+        self.addCleanup(mock.stop)
+        self.addCleanup(st.cache_resource.clear)
+
     def open_movie(self) -> AppTest:
         app = AppTest.from_file(str(ROOT / "app.py"), default_timeout=15).run()
         app.button(key=f"open_{MOVIE_ID}").click().run()
@@ -73,7 +90,7 @@ class StreamlitAppTests(unittest.TestCase):
         app.session_state[f"review_page_{MOVIE_ID}"] = 4
         predictions = [Prediction("Great acting.", False, 0.1, "Safe"),
                        Prediction(" The culprit is revealed.", True, 0.9, "Classifier evidence")]
-        with patch("spoiler_shield.model_adapter.TfidfSpoilerPredictor.predict", return_value=predictions) as predict:
+        with patch("spoiler_shield.distilbert_adapter.DistilbertSpoilerPredictor.predict", return_value=predictions) as predict:
             self.submit(app)
             self.assertEqual(len(app.session_state["added_reviews"][MOVIE_ID]), 1)
             self.assertEqual(app.session_state["added_review_counter"], 1)
@@ -109,7 +126,7 @@ class StreamlitAppTests(unittest.TestCase):
         }
         app.session_state["added_reviews"] = {MOVIE_ID: [legacy]}
         app.session_state["added_review_counter"] = 1
-        with patch("spoiler_shield.model_adapter.TfidfSpoilerPredictor.predict") as predict:
+        with patch("spoiler_shield.distilbert_adapter.DistilbertSpoilerPredictor.predict") as predict:
             self.submit(app)
             predict.assert_not_called()
         self.assertTrue(app.info)
@@ -141,7 +158,7 @@ class StreamlitAppTests(unittest.TestCase):
                   for index in range(1, 101)]
         app.session_state["added_reviews"] = {"tt0468569": stored}
         app.session_state["added_review_counter"] = 100
-        with patch("spoiler_shield.model_adapter.TfidfSpoilerPredictor.predict") as predict:
+        with patch("spoiler_shield.distilbert_adapter.DistilbertSpoilerPredictor.predict") as predict:
             self.submit(app, text="Keep this draft.")
             predict.assert_not_called()
         self.assertTrue(app.error)
@@ -158,7 +175,7 @@ class StreamlitAppTests(unittest.TestCase):
             for index in range(1, 100)
         ]}
         app.session_state["added_review_counter"] = 99
-        with patch("spoiler_shield.model_adapter.TfidfSpoilerPredictor.predict",
+        with patch("spoiler_shield.distilbert_adapter.DistilbertSpoilerPredictor.predict",
                    side_effect=lambda movie, chunks: [Prediction(text, False, 0.1, "Safe") for text in chunks]) as predict:
             self.submit(app)
             self.assertTrue(app.success)
@@ -173,7 +190,7 @@ class StreamlitAppTests(unittest.TestCase):
     def test_failed_analysis_is_logged_and_can_be_retried(self) -> None:
         app = self.open_movie()
         self.open_composer(app)
-        with patch("spoiler_shield.model_adapter.TfidfSpoilerPredictor.predict", side_effect=RuntimeError("Predictor offline")):
+        with patch("spoiler_shield.distilbert_adapter.DistilbertSpoilerPredictor.predict", side_effect=RuntimeError("Predictor offline")):
             with self.assertLogs("spoiler_shield.analysis", level="ERROR") as logs:
                 self.submit(app, text="Keep my review.")
         self.assertIn("Predictor offline", "\n".join(logs.output))
@@ -186,23 +203,23 @@ class StreamlitAppTests(unittest.TestCase):
         self.assertTrue(app.success)
         self.assertEqual(len(app.session_state["added_reviews"][MOVIE_ID]), 1)
 
-    def test_real_submission_records_model_provenance(self) -> None:
+    def test_submission_records_model_provenance(self) -> None:
         app = self.open_movie()
         self.open_composer(app)
         self.assertIn("Trained spoiler detection", self.html(app))
         self.assertNotIn("mock predictor", self.html(app))
         self.submit(app, text="Lovely acting.\n\nAt the end he dies and the killer is revealed.")
         saved = app.session_state["added_reviews"][MOVIE_ID][0]
-        self.assertEqual(saved["model_name"], "TF-IDF + logistic regression")
-        self.assertTrue(saved["model_id"].startswith("tfidf-a-"))
+        self.assertEqual(saved["model_name"], "DistilBERT + movie synopsis")
+        self.assertEqual(saved["model_id"], FakePredictor.model_id)
         self.assertEqual("".join(item.text for item in saved["predictions"]),
                          "Lovely acting.\n\nAt the end he dies and the killer is revealed.")
-        self.assertIn("Your review (TF-IDF + logistic regression)", self.html(app))
+        self.assertIn("Your review (DistilBERT + movie synopsis)", self.html(app))
 
     def test_invalid_prediction_contract_keeps_draft(self) -> None:
         app = self.open_movie()
         self.open_composer(app)
-        with patch("spoiler_shield.model_adapter.TfidfSpoilerPredictor.predict", return_value=[]):
+        with patch("spoiler_shield.distilbert_adapter.DistilbertSpoilerPredictor.predict", return_value=[]):
             with self.assertLogs("spoiler_shield.analysis", level="ERROR"):
                 self.submit(app)
         self.assertTrue(app.error)
@@ -213,13 +230,26 @@ class StreamlitAppTests(unittest.TestCase):
     def test_safe_review_shows_its_percentage(self) -> None:
         app = self.open_movie()
         self.open_composer(app)
-        with patch("spoiler_shield.model_adapter.TfidfSpoilerPredictor.predict",
+        with patch("spoiler_shield.distilbert_adapter.DistilbertSpoilerPredictor.predict",
                    return_value=[Prediction("Lovely acting.", False, 0.123, "Below threshold")]):
             self.submit(app, text="Lovely acting.")
         self.assertTrue(app.success)
         self.assertIn("No sentences hidden", self.html(app))
         self.assertIn('>12.3%</span>', self.html(app))
         self.assertNotIn('<details class="spoiler-mask">', self.html(app))
+
+    def test_sentence_limit_preserves_draft_without_loading_predictor(self) -> None:
+        app = self.open_movie()
+        self.open_composer(app)
+        text = "Short. " * 101
+        with patch("spoiler_shield.distilbert_adapter.DistilbertSpoilerPredictor") as factory:
+            self.submit(app, text=text)
+            factory.assert_not_called()
+        self.assertTrue(app.error)
+        self.assertIn("100 sentences", app.error[0].value)
+        self.assertEqual(app.text_area(key=f"review_text_{MOVIE_ID}").value, text)
+        self.assertEqual(app.session_state["added_reviews"], {})
+        self.assertEqual(app.session_state["added_review_counter"], 0)
 
     def test_incomplete_adapter_keeps_draft_without_incrementing_counter(self) -> None:
         class IncompleteAdapter:
@@ -233,7 +263,7 @@ class StreamlitAppTests(unittest.TestCase):
         self.open_composer(app)
         st.cache_resource.clear()
         try:
-            with patch("spoiler_shield.model_adapter.TfidfSpoilerPredictor", return_value=IncompleteAdapter()):
+            with patch("spoiler_shield.distilbert_adapter.DistilbertSpoilerPredictor", return_value=IncompleteAdapter()):
                 with self.assertLogs("spoiler_shield.analysis", level="ERROR"):
                     self.submit(app)
             self.assertTrue(app.error)
