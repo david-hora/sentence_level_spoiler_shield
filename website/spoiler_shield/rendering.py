@@ -112,7 +112,7 @@ def render_annotated_review(sentences: Sequence[AnnotatedSentence]) -> str:
 
 
 def render_protected_review(predictions: Sequence[Prediction]) -> str:
-    """Render escaped mock predictions with independently revealable spoiler regions."""
+    """Render escaped predictions with independently revealable spoiler regions."""
 
     parts = ['<div class="protected-review" aria-label="Spoiler-protected review">']
     spoiler_number = 0
@@ -121,7 +121,7 @@ def render_protected_review(predictions: Sequence[Prediction]) -> str:
             spoiler_number += 1
         explanation = prediction.explanation
         if prediction.is_spoiler:
-            explanation = f"{explanation} Mock score: {prediction.score:.0%}."
+            explanation = f"{explanation} Model score: {prediction.score:.1%} (not calibrated confidence)."
         parts.append(
             _render_sentence(
                 prediction.text,
