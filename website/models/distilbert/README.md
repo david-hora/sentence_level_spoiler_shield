@@ -22,6 +22,10 @@ calls and reviews are not sent to GitHub or Hugging Face. The first analysis
 downloads the 330 MB runtime package and caches it under the operating system's
 temporary directory, `spoiler-shield-models/<model-id>/`. Cold starts or a cleared
 host cache need another download. Subsequent analyses reuse cached models.
+An OS-backed inter-process lock serializes download and cache cleanup. On the
+next load, abandoned staging directories are removed while that lock is held,
+including when a complete cached model already exists. Active downloads from
+other processes are protected; a terminated process releases its lock.
 An incomplete download is never published as a usable package. Download,
 checksum or loading failures preserve the draft and produce an analysis error;
 there is no silent TF-IDF or mock fallback.
@@ -42,7 +46,9 @@ Preprocessing matches the supplied export and the team's notebook:
    export's threshold. Review whitespace is preserved in the returned predictions.
 
 Inference uses evaluation mode, inference mode, batches of at most eight and two
-CPU threads. Shared model access is serialized. Synopsis embeddings are cached
+CPU threads. Reviews are capped at 100 nonempty sentence chunks before model
+loading or shared model access, in addition to the 12,000-character limit.
+Shared model access is serialized. Synopsis embeddings are cached
 for at most 80 distinct plots. Scores are not calibrated confidence values.
 Explanations state how the decision was made; they do not invent plot evidence.
 
@@ -71,8 +77,9 @@ Then, from `website/`:
 python scripts/package_distilbert.py --classifier-zip "path/to/supplied.zip" --retriever-directory "path/to/pinned-minilm" --output "path/to/spoiler-shield-runtime.zip" --manifest models/distilbert/manifest.json
 ```
 
-The packager fixes archive timestamps and stores SHA-256 checksums. Compare the
-generated retriever checksums with the reviewed manifest before publishing.
+The packager fixes archive timestamps and stores SHA-256 checksums. It validates
+all retriever file checksums against the reviewed snapshot before creating the
+package or manifest, and rechecks the bytes used while packaging.
 Upload the runtime ZIP to the manifest's release URL before deploying the source.
 If publishing a new export, use a new release tag, update the manifest and settings
 validation deliberately, and run tests again. Never replace assets under an old ID.

@@ -49,7 +49,9 @@ The repository contains:
 
 Reviews added through the website are intentionally stored only in Streamlit Session State. They disappear when the browser session or server ends and never modify the team's dataset. Permanent review storage can be added later if it becomes part of the assignment.
 
-Each session can store up to 100 new reviews, each at most 12,000 characters.
+Each session can store up to 100 new reviews, each at most 12,000 characters and
+100 nonempty sentence chunks. Over-fragmented reviews are refused before the
+model is loaded, with the draft preserved.
 Submitting the same movie, headline, rating and review text again returns the
 saved result without adding another copy or running analysis again. At the limit,
 new submissions are refused without removing existing reviews or clearing drafts.

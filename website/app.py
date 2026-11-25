@@ -12,7 +12,7 @@ import streamlit as st
 
 from spoiler_shield.catalog import CatalogError, Movie, load_catalog
 from spoiler_shield.model_adapter import Prediction
-from spoiler_shield.distilbert_adapter import DistilbertSpoilerPredictor
+from spoiler_shield.distilbert_adapter import DistilbertSpoilerPredictor, MAX_REVIEW_SENTENCES
 from spoiler_shield.rendering import REVIEW_STYLES, render_annotated_review, render_protected_review
 from spoiler_shield.reviews import Review, ReviewDataError, load_reviews
 from spoiler_shield.text import split_preserving_formatting
@@ -284,7 +284,7 @@ def render_add_review(movie: Movie) -> None:
                 max_chars=MAX_REVIEW_CHARACTERS,
                 required=True,
                 key=f"review_text_{movie.movie_id}",
-                help="Spacing and line breaks are preserved. Up to 12,000 characters.",
+                help=f"Spacing and line breaks are preserved. Up to 12,000 characters and {MAX_REVIEW_SENTENCES} sentences.",
             )
             st.html(
                 '<div class="analysis-note"><strong>Trained spoiler detection</strong>'
@@ -335,8 +335,12 @@ def render_add_review(movie: Movie) -> None:
         return
 
     try:
+        chunks = split_preserving_formatting(review_text)
+        if sum(bool(text.strip()) for text in chunks) > MAX_REVIEW_SENTENCES:
+            st.error(f"Reviews must contain {MAX_REVIEW_SENTENCES} sentences or fewer. Your draft is still in the form.",
+                     title="Too many sentences")
+            return
         with st.spinner("Analysing your review. The first analysis may take a few minutes while the model loads…"):
-            chunks = split_preserving_formatting(review_text)
             predictor = get_predictor()
             model_name, model_id = predictor.name, predictor.model_id
             if not isinstance(model_name, str) or not model_name or not isinstance(model_id, str) or not model_id:

@@ -5,11 +5,14 @@ import hashlib
 import json
 import os
 from pathlib import Path, PurePosixPath
+import re
 import shutil
 import tempfile
 from urllib.request import Request, urlopen
 import uuid
 import zipfile
+
+from filelock import FileLock
 
 from spoiler_shield.model_adapter import ModelLoadError
 
@@ -79,6 +82,48 @@ def extract_verified_archive(archive: Path, destination: Path, manifest: dict) -
         raise ModelLoadError("The extracted model files failed their checksums")
 
 
+def remove_staging_directory(directory: Path, cache_root: Path) -> None:
+    # Check the final absolute deletion target, including Windows junctions.
+    if (directory.is_symlink() or directory.is_junction()
+            or directory.resolve().parent != cache_root.resolve()
+            or re.fullmatch(r"\.download-[0-9a-f]{32}", directory.name) is None):
+        raise ModelLoadError("Refusing to remove a staging path outside the model cache")
+    shutil.rmtree(directory)
+
+
+def _ensure_package_locked(cache_root: Path, manifest: dict) -> tuple[Path, dict]:
+    # The OS-backed download lock is released on process death. With it held,
+    # every staging directory from an earlier attempt is abandoned, even if new.
+    for directory in cache_root.glob(".download-*"):
+        if (directory.is_dir() and not directory.is_symlink() and not directory.is_junction()
+                and re.fullmatch(r"\.download-[0-9a-f]{32}", directory.name)):
+            remove_staging_directory(directory, cache_root)
+    target = cache_root / manifest["model_id"]
+    if target.exists():
+        if not verify_directory(target, manifest):
+            raise ModelLoadError("The cached inference package is corrupt; clear its cache and retry")
+        return target, manifest
+    staging = cache_root / (".download-" + uuid.uuid4().hex)
+    staging.mkdir()
+    try:
+        archive = staging / "runtime.zip"
+        request = Request(manifest["archive_url"], headers={"User-Agent": "SpoilerShield/1.0"})
+        received = 0
+        with urlopen(request, timeout=60) as response, archive.open("wb") as output:
+            while chunk := response.read(1024 * 1024):
+                received += len(chunk)
+                if received > manifest["archive_size"]:
+                    raise ModelLoadError("Model download exceeds its expected size")
+                output.write(chunk)
+        extracted = staging / "extracted"
+        extracted.mkdir()
+        extract_verified_archive(archive, extracted, manifest)
+        os.rename(extracted, target)
+    finally:
+        remove_staging_directory(staging, cache_root)
+    return target, manifest
+
+
 def ensure_model_package(cache_root: Path | None = None) -> tuple[Path, dict]:
     try:
         manifest = json.loads(MANIFEST_PATH.read_text(encoding="utf-8"))
@@ -86,35 +131,8 @@ def ensure_model_package(cache_root: Path | None = None) -> tuple[Path, dict]:
         # A writable cache outside the checkout also works on Streamlit Cloud.
         cache_root = cache_root or Path(tempfile.gettempdir()) / "spoiler-shield-models"
         cache_root.mkdir(parents=True, exist_ok=True)
-        target = cache_root / manifest["model_id"]
-        if target.exists():
-            if not verify_directory(target, manifest):
-                raise ModelLoadError("The cached inference package is corrupt; clear its cache and retry")
-            return target, manifest
-        staging = cache_root / (".download-" + uuid.uuid4().hex)
-        staging.mkdir()
-        try:
-            archive = staging / "runtime.zip"
-            request = Request(manifest["archive_url"], headers={"User-Agent": "SpoilerShield/1.0"})
-            received = 0
-            with urlopen(request, timeout=60) as response, archive.open("wb") as output:
-                while chunk := response.read(1024 * 1024):
-                    received += len(chunk)
-                    if received > manifest["archive_size"]:
-                        raise ModelLoadError("Model download exceeds its expected size")
-                    output.write(chunk)
-            extracted = staging / "extracted"
-            extracted.mkdir()
-            extract_verified_archive(archive, extracted, manifest)
-            try:
-                os.rename(extracted, target)
-            except OSError:
-                # Another process may have published this same immutable export.
-                if not target.is_dir() or not verify_directory(target, manifest):
-                    raise
-        finally:
-            shutil.rmtree(staging)
-        return target, manifest
+        with FileLock(str(cache_root / ".download.lock"), timeout=180):
+            return _ensure_package_locked(cache_root, manifest)
     except ModelLoadError:
         raise
     except Exception as exc:

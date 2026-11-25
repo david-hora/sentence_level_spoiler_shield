@@ -15,11 +15,20 @@ CLASSIFIER_FILES = {
     "config.json", "model.safetensors", "spoiler_shield_config.json",
     "tokenizer.json", "tokenizer_config.json",
 }
-RETRIEVER_FILES = {
-    "1_Pooling/config.json", "README.md", "config.json", "config_sentence_transformers.json",
-    "model.safetensors", "modules.json", "sentence_bert_config.json", "special_tokens_map.json",
-    "tokenizer.json", "tokenizer_config.json", "vocab.txt",
+RETRIEVER_SHA256 = {
+    "1_Pooling/config.json": "4be450dde3b0273bb9787637cfbd28fe04a7ba6ab9d36ac48e92b11e350ffc23",
+    "README.md": "dcd602d2fd35c203a247304a06fec6654a12f7941b739f9221a064fe8dc3b7f0",
+    "config.json": "953f9c0d463486b10a6871cc2fd59f223b2c70184f49815e7efbcab5d8908b41",
+    "config_sentence_transformers.json": "061ca9d39661d6c6d6de5ba27f79a1cd5770ea247f8d46412a68a498dc5ac9f3",
+    "model.safetensors": "53aa51172d142c89d9012cce15ae4d6cc0ca6895895114379cacb4fab128d9db",
+    "modules.json": "84e40c8e006c9b1d6c122e02cba9b02458120b5fb0c87b746c41e0207cf642cf",
+    "sentence_bert_config.json": "fc1993fde0a95c24ec6c022539d41cf6e2f7c9721e5415d6fb6897472a9cd4b7",
+    "special_tokens_map.json": "303df45a03609e4ead04bc3dc1536d0ab19b5358db685b6f3da123d05ec200e3",
+    "tokenizer.json": "be50c3628f2bf5bb5e3a7f17b1f74611b2561a3a27eeab05e5aa30f411572037",
+    "tokenizer_config.json": "acb92769e8195aabd29b7b2137a9e6d6e25c476a4f15aa4355c233426c61576b",
+    "vocab.txt": "07eced375cec144d27c900241f3e339478dec958f92fddbc551f295c992038a3",
 }
+RETRIEVER_FILES = set(RETRIEVER_SHA256)
 REVISION = "1110a243fdf4706b3f48f1d95db1a4f5529b4d41"
 SOURCE_SHA256 = "ef24ce49eab8d89c2afd851e8a4fc3c58717964d03dd65f60da27b612425c04d"
 URL = "https://github.com/david-hora/sentence_level_spoiler_shield/releases/download/distilbert-synopsis-2026-11-25/spoiler-shield-runtime.zip"
@@ -33,6 +42,12 @@ def checksum(path: Path) -> str:
     return digest.hexdigest()
 
 
+def validate_retriever(directory: Path) -> None:
+    for name, expected in RETRIEVER_SHA256.items():
+        if checksum(directory / name) != expected:
+            raise ValueError(f"Retriever file does not match pinned revision {REVISION}: {name}")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--classifier-zip", type=Path, required=True)
@@ -42,6 +57,7 @@ def main() -> None:
     args = parser.parse_args()
     if checksum(args.classifier_zip) != SOURCE_SHA256:
         raise ValueError("This packager is pinned to the supplied 25 Nov 2026 export")
+    validate_retriever(args.retriever_directory)
     records = {}
     args.output.parent.mkdir(parents=True, exist_ok=True)
     with zipfile.ZipFile(args.classifier_zip) as source, zipfile.ZipFile(
@@ -51,6 +67,8 @@ def main() -> None:
         for folder, names in (("classifier", CLASSIFIER_FILES), ("retriever", RETRIEVER_FILES)):
             for name in sorted(names):
                 data = source.read(name) if folder == "classifier" else (args.retriever_directory / name).read_bytes()
+                if folder == "retriever" and hashlib.sha256(data).hexdigest() != RETRIEVER_SHA256[name]:
+                    raise ValueError(f"Retriever file changed after validation: {name}")
                 member = f"{folder}/{name}"
                 entry = zipfile.ZipInfo(member, date_time=(2026, 11, 25, 0, 0, 0))
                 entry.compress_type = zipfile.ZIP_DEFLATED

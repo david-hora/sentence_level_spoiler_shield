@@ -17,7 +17,7 @@ class FakePredictor:
     """Keep UI tests offline; the supplied weights have a separate integration test."""
     name = "DistilBERT + movie synopsis"
     is_mock = False
-    model_id = "distilbert-synopsis-test"
+    model_id = "distilbert-synopsis-ui-provenance-sentinel-49281"
 
     def predict(self, movie, sentences):
         return [Prediction(text, False, 0.1, "UI test prediction") for text in sentences]
@@ -211,7 +211,7 @@ class StreamlitAppTests(unittest.TestCase):
         self.submit(app, text="Lovely acting.\n\nAt the end he dies and the killer is revealed.")
         saved = app.session_state["added_reviews"][MOVIE_ID][0]
         self.assertEqual(saved["model_name"], "DistilBERT + movie synopsis")
-        self.assertTrue(saved["model_id"].startswith("distilbert-synopsis-"))
+        self.assertEqual(saved["model_id"], FakePredictor.model_id)
         self.assertEqual("".join(item.text for item in saved["predictions"]),
                          "Lovely acting.\n\nAt the end he dies and the killer is revealed.")
         self.assertIn("Your review (DistilBERT + movie synopsis)", self.html(app))
@@ -237,6 +237,19 @@ class StreamlitAppTests(unittest.TestCase):
         self.assertIn("No sentences hidden", self.html(app))
         self.assertIn('>12.3%</span>', self.html(app))
         self.assertNotIn('<details class="spoiler-mask">', self.html(app))
+
+    def test_sentence_limit_preserves_draft_without_loading_predictor(self) -> None:
+        app = self.open_movie()
+        self.open_composer(app)
+        text = "Short. " * 101
+        with patch("spoiler_shield.distilbert_adapter.DistilbertSpoilerPredictor") as factory:
+            self.submit(app, text=text)
+            factory.assert_not_called()
+        self.assertTrue(app.error)
+        self.assertIn("100 sentences", app.error[0].value)
+        self.assertEqual(app.text_area(key=f"review_text_{MOVIE_ID}").value, text)
+        self.assertEqual(app.session_state["added_reviews"], {})
+        self.assertEqual(app.session_state["added_review_counter"], 0)
 
     def test_incomplete_adapter_keeps_draft_without_incrementing_counter(self) -> None:
         class IncompleteAdapter:

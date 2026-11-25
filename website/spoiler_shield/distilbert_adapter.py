@@ -15,6 +15,7 @@ from spoiler_shield.model_adapter import ModelLoadError, Prediction
 from spoiler_shield.model_assets import ensure_model_package, validate_manifest, verify_directory
 
 SYNOPSIS_SPLIT = re.compile(r'''(?<=[.!?])\s+(?=["'(\[]?[A-Z0-9])''')
+MAX_REVIEW_SENTENCES = 100
 
 
 def synopsis_sentences(movie: Movie) -> list[tuple[str, float]]:
@@ -98,6 +99,8 @@ class DistilbertSpoilerPredictor:
     def predict(self, movie: Movie, sentences: Sequence[str]) -> list[Prediction]:
         if not sentences:
             return []
+        if sum(bool(text.strip()) for text in sentences) > MAX_REVIEW_SENTENCES:
+            raise ValueError(f"Reviews must contain at most {MAX_REVIEW_SENTENCES} sentences")
         import numpy as np
 
         active = [i for i, text in enumerate(sentences) if text.strip()]

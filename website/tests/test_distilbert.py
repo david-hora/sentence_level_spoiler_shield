@@ -1,17 +1,22 @@
 import hashlib
+from concurrent.futures import ThreadPoolExecutor
 import json
 import os
 from pathlib import Path
 import shutil
 import tempfile
+from threading import Event
 import unittest
 from unittest.mock import patch
 import uuid
 import zipfile
+from urllib.request import urlopen
+
+from scripts import package_distilbert
 
 from spoiler_shield.catalog import Movie, load_catalog
 from spoiler_shield.distilbert_adapter import (
-    DistilbertSpoilerPredictor, position_tag, select_context, synopsis_sentences, validate_settings,
+    DistilbertSpoilerPredictor, MAX_REVIEW_SENTENCES, position_tag, select_context, synopsis_sentences, validate_settings,
 )
 from spoiler_shield.model_adapter import ModelLoadError
 from spoiler_shield.model_assets import (
@@ -20,6 +25,11 @@ from spoiler_shield.model_assets import (
 
 
 class SynopsisTests(unittest.TestCase):
+    def test_too_many_sentences_rejected_before_loading_or_using_models(self):
+        predictor = object.__new__(DistilbertSpoilerPredictor)
+        with self.assertRaisesRegex(ValueError, "at most 100 sentences"):
+            predictor.predict(Movie("x", "Test", None, "", "", ()), ["Short."] * (MAX_REVIEW_SENTENCES + 1))
+
     def test_short_synopsis_uses_summary_and_removes_author(self):
         movie = Movie("x", "Test", None, "Short synopsis.",
                       "First event. Second event. Written by a contributor", ())
@@ -80,7 +90,56 @@ class PackageTests(unittest.TestCase):
         with patch("spoiler_shield.model_assets.MANIFEST_PATH", self.manifest_path):
             with self.assertRaises(ModelLoadError):
                 ensure_model_package(cache)
-        self.assertEqual(list(cache.iterdir()), [])
+        # Native backends may retain the small lock file after releasing it.
+        self.assertLessEqual({path.name for path in cache.iterdir()}, {".download.lock"})
+
+    def test_abandoned_staging_removed_even_when_model_already_cached(self):
+        cache = self.root / "cache"
+        with patch("spoiler_shield.model_assets.MANIFEST_PATH", self.manifest_path):
+            target, _ = ensure_model_package(cache)
+            abandoned = cache / (".download-" + "a" * 32)
+            abandoned.mkdir()
+            (abandoned / "runtime.zip").write_bytes(b"interrupted download")
+            unrelated = cache / ".download-unrelated"
+            unrelated.mkdir()
+            self.assertEqual(ensure_model_package(cache)[0], target)
+            self.assertFalse(abandoned.exists())
+            self.assertTrue(unrelated.exists())
+
+    def test_concurrent_loaders_do_not_remove_active_download_or_download_twice(self):
+        cache = self.root / "cache"
+        started, release = Event(), Event()
+
+        def delayed_download(*args, **kwargs):
+            started.set()
+            if not release.wait(5):
+                raise AssertionError("Test download was not released")
+            return urlopen(*args, **kwargs)
+
+        with patch("spoiler_shield.model_assets.MANIFEST_PATH", self.manifest_path), \
+                patch("spoiler_shield.model_assets.urlopen", side_effect=delayed_download) as download, \
+                ThreadPoolExecutor(max_workers=2) as executor:
+            first = executor.submit(ensure_model_package, cache)
+            try:
+                self.assertTrue(started.wait(5))
+                second = executor.submit(ensure_model_package, cache)
+                self.assertFalse(second.done())
+            finally:
+                release.set()
+            self.assertEqual(first.result(timeout=5)[0], second.result(timeout=5)[0])
+            self.assertEqual(download.call_count, 1)
+
+    def test_packager_rejects_wrong_retriever_bytes(self):
+        retriever = self.root / "retriever"
+        retriever.mkdir()
+        file = retriever / "config.json"
+        file.write_bytes(b"pinned snapshot")
+        hashes = {"config.json": hashlib.sha256(file.read_bytes()).hexdigest()}
+        with patch.object(package_distilbert, "RETRIEVER_SHA256", hashes):
+            package_distilbert.validate_retriever(retriever)
+            file.write_bytes(b"different snapshot")
+            with self.assertRaisesRegex(ValueError, "does not match pinned revision"):
+                package_distilbert.validate_retriever(retriever)
 
     def test_rejects_traversal_and_changed_archive(self):
         with self.assertRaises(ModelLoadError):
