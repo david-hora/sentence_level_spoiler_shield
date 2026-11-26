@@ -38,7 +38,7 @@ class StreamlitAppTests(unittest.TestCase):
         return app
 
     def open_composer(self, app: AppTest) -> None:
-        app.get_by_key("detail_view").set_value("Add a review").run()
+        app.get_by_key(f"detail_view_{app.session_state['selected_movie_id']}").set_value("Add a review").run()
         self.assertFalse(app.exception)
 
     def submit(self, app: AppTest, headline="A new review", text="Great acting. The culprit is revealed.") -> None:
@@ -74,15 +74,54 @@ class StreamlitAppTests(unittest.TestCase):
         app.button(key="back_to_library").click().run()
         # Streamlit can clean up an unmounted widget; seed the stale value to
         # ensure the navigation callback itself also guarantees the default.
-        app.session_state["detail_view"] = "Add a review"
         other_movie = next(button for button in app.button
                            if str(button.key).startswith("open_") and button.key != f"open_{MOVIE_ID}")
         other_movie_id = other_movie.key.removeprefix("open_")
+        app.session_state[f"detail_view_{other_movie_id}"] = "Add a review"
         other_movie.click().run()
         self.assertFalse(app.exception)
         self.assertEqual(app.session_state["selected_movie_id"], other_movie_id)
-        self.assertEqual(app.session_state["detail_view"], "Reviews")
+        self.assertEqual(app.get_by_key(f"detail_view_{other_movie_id}").value, "Reviews")
         self.assertEqual(self.html(app).count('<header class="review-heading">'), 5)
+
+    def test_logo_links_to_library_on_both_views(self) -> None:
+        app = AppTest.from_file(str(ROOT / "app.py"), default_timeout=15).run()
+        self.assertEqual(app.page_link[0].proto.page, "")
+        self.assertFalse(app.page_link[0].proto.external)
+        app.button(key=f"open_{MOVIE_ID}").click().run()
+        self.assertFalse(app.exception)
+        self.assertEqual(app.page_link[0].proto.page, "")
+        self.assertEqual(app.page_link[0].label, "Spoiler:primary[Shield]")
+
+    def test_search_and_library_page_survive_movie_visit(self) -> None:
+        app = AppTest.from_file(str(ROOT / "app.py"), default_timeout=15).run()
+        pager = next(item for item in app.get("pagination") if str(item.key).startswith("library_page_"))
+        pager.set_value(3).run()
+        movie_button = next(button for button in app.button if str(button.key).startswith("open_"))
+        movie_button.click().run()
+        app.button(key="back_to_library").click().run()
+        self.assertFalse(app.exception)
+        self.assertEqual(next(iter(app.get("pagination"))).value, 3)
+        app.text_input(key="movie_search").set_value("Warcraft").run()
+        app.button(key="open_tt0803096").click().run()
+        app.button(key="back_to_library").click().run()
+        self.assertEqual(app.text_input(key="movie_search").value, "Warcraft")
+
+    def test_review_draft_survives_views_and_movie_navigation(self) -> None:
+        app = self.open_movie()
+        app.get_by_key(f"review_page_{MOVIE_ID}").set_value(3).run()
+        self.open_composer(app)
+        app.text_input(key=f"review_headline_{MOVIE_ID}").set_value("Unfinished draft")
+        app.text_area(key=f"review_text_{MOVIE_ID}").set_value("Keep these thoughts.\n\nSecond paragraph.").run()
+        app.get_by_key(f"detail_view_{MOVIE_ID}").set_value("Reviews").run()
+        app.button(key="back_to_library").click().run()
+        app.button(key=f"open_{MOVIE_ID}").click().run()
+        self.assertEqual(app.get_by_key(f"review_page_{MOVIE_ID}").value, 3)
+        self.open_composer(app)
+        self.assertEqual(app.text_input(key=f"review_headline_{MOVIE_ID}").value, "Unfinished draft")
+        self.assertEqual(app.text_area(key=f"review_text_{MOVIE_ID}").value,
+                         "Keep these thoughts.\n\nSecond paragraph.")
+        self.assertEqual(app.session_state["added_reviews"], {})
 
     def test_submission_updates_totals_page_and_is_idempotent(self) -> None:
         app = self.open_movie()
@@ -109,7 +148,7 @@ class StreamlitAppTests(unittest.TestCase):
             self.submit(app)
             self.assertEqual(len(app.session_state["added_reviews"][MOVIE_ID]), 2)
             self.assertEqual(predict.call_count, 2)
-        app.get_by_key("detail_view").set_value("Reviews").run()
+        app.get_by_key(f"detail_view_{MOVIE_ID}").set_value("Reviews").run()
         self.assertFalse(app.exception)
         self.assertEqual(self.html(app).count('<header class="review-heading">'), 5)
         self.assertIn("<h3>A new review</h3>", self.html(app))
@@ -139,7 +178,7 @@ class StreamlitAppTests(unittest.TestCase):
         self.open_composer(app)
         self.submit(app)
         self.assertTrue(app.success)
-        app.get_by_key("detail_view").set_value("Reviews").run()
+        app.get_by_key(f"detail_view_{MOVIE_ID}").set_value("Reviews").run()
         self.open_composer(app)
         self.assertFalse(app.success)
         self.assertFalse(app.info)
