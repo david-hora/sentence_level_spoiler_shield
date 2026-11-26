@@ -114,7 +114,7 @@ class StreamlitAppTests(unittest.TestCase):
         for query in ["a", "e", "Action", "Drama", "no-such-movie", ""]:
             app.text_input(key="movie_search").set_value(query).run()
             self.assertFalse(app.exception)
-            self.assertEqual(app.session_state["library_page"], 1)
+            self.assertEqual(app.session_state.get("library_page", 1), 1)
         page_keys = {key for key in app.session_state.keys() if str(key).startswith("library_page")}
         self.assertEqual(page_keys, {"library_page", "library_page_query"})
 
@@ -144,7 +144,7 @@ class StreamlitAppTests(unittest.TestCase):
             self.submit(app)
             self.assertEqual(len(app.session_state["added_reviews"][MOVIE_ID]), 1)
             self.assertEqual(app.session_state["added_review_counter"], 1)
-            self.assertEqual(app.session_state[f"review_page_{MOVIE_ID}"], 1)
+            self.assertEqual(app.session_state.get(f"review_page_{MOVIE_ID}", 1), 1)
             self.assertIn("<dt>Reviews</dt><dd>41</dd>", self.html(app))
             self.assertIn("<dt>Hidden sentences</dt><dd>65</dd>", self.html(app))
             self.assertTrue(app.success)

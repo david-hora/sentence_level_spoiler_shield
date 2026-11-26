@@ -163,7 +163,7 @@ def render_library(movies: list[Movie], reviews_by_movie: dict[str, tuple[Review
     normalized_query = query.strip().casefold()
     # Persist one current-query page value, not a growing key for every search.
     if st.session_state.get("library_page_query") != normalized_query:
-        st.session_state.library_page = 1
+        st.session_state.pop("library_page", None)
         st.session_state.library_page_query = normalized_query
     filtered = [
         movie for movie in movies
@@ -239,7 +239,7 @@ def render_reviews(
 
 def show_movie_reviews(movie_id: str) -> None:
     st.session_state[f"detail_view_{movie_id}"] = "Reviews"
-    st.session_state[f"review_page_{movie_id}"] = 1
+    st.session_state.pop(f"review_page_{movie_id}", None)
 
 
 def render_submission_result(movie_id: str) -> None:
@@ -381,7 +381,7 @@ def render_add_review(movie: Movie) -> None:
         "model_id": model_id,
     }
     st.session_state.added_reviews.setdefault(movie.movie_id, []).insert(0, added_review)
-    st.session_state[f"review_page_{movie.movie_id}"] = 1
+    st.session_state.pop(f"review_page_{movie.movie_id}", None)
     st.session_state.review_submission_result = {
         "movie_id": movie.movie_id, "review_id": added_review["id"], "duplicate": False,
     }
