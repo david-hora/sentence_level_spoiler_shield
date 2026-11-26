@@ -25,6 +25,8 @@ REVIEWS_PER_PAGE = 5
 MAX_REVIEW_CHARACTERS = 12_000
 MAX_SESSION_REVIEWS = 100
 LOGGER = logging.getLogger("spoiler_shield.analysis")
+HOME_PAGE: st.Page
+MOVIE_PAGES: dict[str, st.Page]
 
 
 st.set_page_config(
@@ -60,13 +62,17 @@ def hero_background() -> str:
     )
 
 
-def open_movie(movie_id: str) -> None:
+def open_movie(movie_id: str, view: str | None = None) -> None:
     st.session_state.selected_movie_id = movie_id
-    st.session_state.detail_view = "Reviews"
+    if view is None:
+        st.session_state.setdefault(f"detail_view_{movie_id}", "Reviews")
+    else:
+        st.session_state[f"detail_view_{movie_id}"] = view
+    st.switch_page(MOVIE_PAGES[movie_id], query_params={})
 
 
 def close_movie() -> None:
-    st.session_state.selected_movie_id = None
+    st.switch_page(HOME_PAGE, query_params={})
 
 
 def rating_label(value: int | None) -> str:
@@ -76,7 +82,8 @@ def rating_label(value: int | None) -> str:
 def render_masthead(in_movie: bool) -> None:
     with st.container(horizontal=True, horizontal_alignment="distribute",
                       vertical_alignment="center", key="masthead"):
-        st.html('<span class="wordmark">Spoiler<span>Shield</span></span>', width="content")
+        with st.container(key="home_logo", width="content"):
+            st.page_link(HOME_PAGE, label="Spoiler:primary[Shield]", help="Return to the movie library")
         if in_movie:
             st.button("Movie library", key="back_to_library", on_click=close_movie, type="tertiary")
         else:
@@ -130,9 +137,7 @@ def choose_review_movie(movies: list[Movie]) -> None:
         placeholder="Search for a movie", key="review_movie_choice",
     )
     if st.button("Write review", key="picker_write_review", type="primary", disabled=movie is None, width="stretch") and movie is not None:
-        st.session_state.selected_movie_id = movie.movie_id
-        st.session_state.detail_view = "Add a review"
-        st.rerun()
+        open_movie(movie.movie_id, "Add a review")
 
 
 def render_library(movies: list[Movie], reviews_by_movie: dict[str, tuple[Review, ...]]) -> None:
@@ -151,10 +156,15 @@ def render_library(movies: list[Movie], reviews_by_movie: dict[str, tuple[Review
             query = st.text_input(
                 "Search movies", live="300ms", label_visibility="collapsed",
                 placeholder="Search by movie title, year or genre", max_chars=100, key="movie_search",
+                persist_state="session",
             )
             if st.button("Add a Review", key="hero_add_review", type="primary"):
                 choose_review_movie(movies)
     normalized_query = query.strip().casefold()
+    # Persist one current-query page value, not a growing key for every search.
+    if st.session_state.get("library_page_query") != normalized_query:
+        st.session_state.pop("library_page", None)
+        st.session_state.library_page_query = normalized_query
     filtered = [
         movie for movie in movies
         if not normalized_query
@@ -169,12 +179,12 @@ def render_library(movies: list[Movie], reviews_by_movie: dict[str, tuple[Review
         return
 
     total_pages = math.ceil(len(filtered) / MOVIES_PER_PAGE)
-    query_digest = hashlib.sha1(normalized_query.encode("utf-8")).hexdigest()[:10]
     listing = st.container(key="listing")
     page = 1
     if total_pages > 1:
         with st.container(key="library_pagination", width="content"):
-            page = st.pagination(total_pages, key=f"library_page_{query_digest}", width="content")
+            page = st.pagination(total_pages, key="library_page", width="content",
+                                 persist_state="session")
 
     start = (page - 1) * MOVIES_PER_PAGE
     with listing:
@@ -208,7 +218,8 @@ def render_reviews(
     reviews_slot = st.container()
     with st.container(horizontal=True, horizontal_alignment="distribute", vertical_alignment="center", key="review_pagination"):
         st.caption(f"{all_count} reviews. Spoiler sentences are hidden until you reveal them.")
-        page = st.pagination(total_pages, key=f"review_page_{movie_id}", width="content")
+        page = st.pagination(total_pages, key=f"review_page_{movie_id}", width="content",
+                             persist_state="session")
 
     start = (page - 1) * REVIEWS_PER_PAGE
     end = start + REVIEWS_PER_PAGE
@@ -227,8 +238,8 @@ def render_reviews(
 
 
 def show_movie_reviews(movie_id: str) -> None:
-    st.session_state.detail_view = "Reviews"
-    st.session_state[f"review_page_{movie_id}"] = 1
+    st.session_state[f"detail_view_{movie_id}"] = "Reviews"
+    st.session_state.pop(f"review_page_{movie_id}", None)
 
 
 def render_submission_result(movie_id: str) -> None:
@@ -262,7 +273,9 @@ def render_add_review(movie: Movie) -> None:
             '<div class="composer-heading"><h2>Write your review</h2>'
             f'<p>Share your thoughts on {escape(movie.title)}.</p></div>'
         )
-        with st.form("add_review_form", clear_on_submit=False, border=False):
+        # Commit draft edits on blur and retain them when this view is unmounted.
+        # Only the submit button runs analysis; a form would buffer these edits.
+        with st.container(key="add_review_fields"):
             headline_column, rating_column = st.columns([4, 1], gap="medium")
             with headline_column:
                 summary = st.text_input(
@@ -271,11 +284,13 @@ def render_add_review(movie: Movie) -> None:
                     max_chars=160,
                     required=True,
                     key=f"review_headline_{movie.movie_id}",
+                    persist_state="session",
                 )
             with rating_column:
                 rating = st.number_input(
                     "Rating out of 10", min_value=1, max_value=10, value=8, step=1,
                     key=f"review_rating_{movie.movie_id}",
+                    persist_state="session",
                 )
             review_text = st.text_area(
                 "Your review",
@@ -284,6 +299,7 @@ def render_add_review(movie: Movie) -> None:
                 max_chars=MAX_REVIEW_CHARACTERS,
                 required=True,
                 key=f"review_text_{movie.movie_id}",
+                persist_state="session",
                 help=f"Spacing and line breaks are preserved. Up to 12,000 characters and {MAX_REVIEW_SENTENCES} sentences.",
             )
             st.html(
@@ -291,7 +307,7 @@ def render_add_review(movie: Movie) -> None:
                 '<span>DistilBERT analyses English sentences with relevant movie synopsis context. '
                 'It can miss spoilers or hide safe sentences.</span></div>'
             )
-            submitted = st.form_submit_button(
+            submitted = st.button(
                 "Add and analyse review", key="submit_review", type="primary", width="stretch",
             )
         st.caption(f"Your review is saved for this browser session. Up to {MAX_SESSION_REVIEWS} reviews per session.")
@@ -365,7 +381,7 @@ def render_add_review(movie: Movie) -> None:
         "model_id": model_id,
     }
     st.session_state.added_reviews.setdefault(movie.movie_id, []).insert(0, added_review)
-    st.session_state[f"review_page_{movie.movie_id}"] = 1
+    st.session_state.pop(f"review_page_{movie.movie_id}", None)
     st.session_state.review_submission_result = {
         "movie_id": movie.movie_id, "review_id": added_review["id"], "duplicate": False,
     }
@@ -401,12 +417,14 @@ def render_movie_detail(
             with st.expander("Movie overview"):
                 st.write(movie.plot_summary)
 
-    st.session_state.setdefault("detail_view", "Reviews")
+    view_key = f"detail_view_{movie.movie_id}"
+    st.session_state.setdefault(view_key, "Reviews")
     view = st.segmented_control(
         "Movie section",
         ["Reviews", "Add a review"],
-        key="detail_view",
+        key=view_key,
         label_visibility="collapsed",
+        persist_state="session",
     )
     if view == "Add a review":
         render_add_review(movie)
@@ -429,18 +447,32 @@ except (CatalogError, ReviewDataError) as exc:
     st.info("Confirm that the repository's data folder is present, then restart the app.")
     st.stop()
 
-movie_by_id = {movie.movie_id: movie for movie in movies}
-selected_movie_id = st.session_state.selected_movie_id
-if selected_movie_id and selected_movie_id in movie_by_id:
+def render_movie_page(movie: Movie) -> None:
+    st.session_state.selected_movie_id = movie.movie_id
     with st.container(key="movie_page"):
         render_masthead(True)
-        selected_movie = movie_by_id[selected_movie_id]
         render_movie_detail(
-            selected_movie,
-            reviews_by_movie.get(selected_movie_id, ()),
-            st.session_state.added_reviews.get(selected_movie_id, []),
+            movie,
+            reviews_by_movie.get(movie.movie_id, ()),
+            st.session_state.added_reviews.get(movie.movie_id, []),
         )
-else:
+
+
+def render_library_page() -> None:
+    st.session_state.selected_movie_id = None
     with st.container(key="library_canvas"):
         render_masthead(False)
         render_library(movies, reviews_by_movie)
+
+
+HOME_PAGE = st.Page(render_library_page, title="Movie library", default=True,
+                    help="Browse and search the movie library.")
+MOVIE_PAGES = {
+    movie.movie_id: st.Page(
+        lambda movie=movie: render_movie_page(movie), title=movie.title,
+        url_path=f"movie-{movie.movie_id}", help=f"Read or add reviews of {movie.title}.",
+    )
+    for movie in movies
+}
+current_page = st.navigation([HOME_PAGE, *MOVIE_PAGES.values()], position="hidden")
+current_page.run()

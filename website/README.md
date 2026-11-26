@@ -40,6 +40,15 @@ use the trained classifier; existing dataset annotations are not replaced.
 
 ## Data and persistence
 
+The logo is an internal link back to the movie library. Movies have stable URLs
+such as `/movie-tt0803096`, and browser Back/Forward moves between the library
+and movie pages without creating a new session. Search text, library and review
+pagination, each movie's selected review view, draft headline/text/rating, and
+session-added reviews survive navigation. Draft edits are committed when a field
+loses focus; prediction runs only when the add-review button is pressed.
+This state lasts for the current Streamlit session. Movie URLs can be reopened
+or shared, but drafts and added reviews are not permanent or stored in URLs.
+
 The repository contains:
 
 - 80 movies;

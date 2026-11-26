@@ -15,12 +15,15 @@
     padding-bottom: .65rem;
     border-bottom: 1px solid var(--rule);
 }
-.wordmark {
+.wordmark, .st-key-home_logo p {
     color: var(--ink);
     font: 760 1.35rem/1.2 "Segoe UI", Arial, sans-serif;
     letter-spacing: -.065em;
 }
-.wordmark span { color: var(--coral); }
+.wordmark span, .st-key-home_logo p span { color: var(--coral); }
+.st-key-home_logo a { padding: 0; text-decoration: none; background: transparent; }
+.st-key-home_logo a:hover { background: transparent; }
+.st-key-home_logo a:focus-visible { outline: 2px solid var(--coral); outline-offset: 4px; }
 .current-page, .st-key-back_to_library button {
     color: var(--coral);
     font-size: .95rem;
@@ -186,8 +189,8 @@
     background: transparent;
     border-bottom-color: rgba(255, 255, 255, .22);
 }
-.st-key-library_canvas .wordmark { color: #ffffff; }
-.st-key-library_canvas .wordmark span { color: #f5ba45; }
+.st-key-library_canvas .wordmark, .st-key-library_canvas .st-key-home_logo p { color: #ffffff; }
+.st-key-library_canvas .wordmark span, .st-key-library_canvas .st-key-home_logo p span { color: #f5ba45; }
 .st-key-library_canvas .current-page { color: #ffffff; border-bottom-color: #f5ba45; }
 .st-key-library_canvas::before {
     content: "";
