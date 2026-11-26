@@ -68,21 +68,22 @@ class StreamlitAppTests(unittest.TestCase):
             self.assertIn(f"<h3>{escape(review.summary)}</h3>", self.html(app))
         self.assertNotIn(f"<h3>{escape(dataset[5].summary)}</h3>", self.html(app))
 
-    def test_opening_another_movie_resets_to_reviews(self) -> None:
+    def test_each_movie_retains_its_own_view(self) -> None:
         app = self.open_movie()
         self.open_composer(app)
         app.button(key="back_to_library").click().run()
-        # Streamlit can clean up an unmounted widget; seed the stale value to
-        # ensure the navigation callback itself also guarantees the default.
         other_movie = next(button for button in app.button
                            if str(button.key).startswith("open_") and button.key != f"open_{MOVIE_ID}")
         other_movie_id = other_movie.key.removeprefix("open_")
-        app.session_state[f"detail_view_{other_movie_id}"] = "Add a review"
         other_movie.click().run()
         self.assertFalse(app.exception)
         self.assertEqual(app.session_state["selected_movie_id"], other_movie_id)
         self.assertEqual(app.get_by_key(f"detail_view_{other_movie_id}").value, "Reviews")
         self.assertEqual(self.html(app).count('<header class="review-heading">'), 5)
+        app.button(key="back_to_library").click().run()
+        app.button(key=f"open_{MOVIE_ID}").click().run()
+        self.assertEqual(app.get_by_key(f"detail_view_{MOVIE_ID}").value, "Add a review")
+        self.assertIsNotNone(app.text_area(key=f"review_text_{MOVIE_ID}"))
 
     def test_logo_links_to_library_on_both_views(self) -> None:
         app = AppTest.from_file(str(ROOT / "app.py"), default_timeout=15).run()
@@ -95,7 +96,7 @@ class StreamlitAppTests(unittest.TestCase):
 
     def test_search_and_library_page_survive_movie_visit(self) -> None:
         app = AppTest.from_file(str(ROOT / "app.py"), default_timeout=15).run()
-        pager = next(item for item in app.get("pagination") if str(item.key).startswith("library_page_"))
+        pager = app.get_by_key("library_page")
         pager.set_value(3).run()
         movie_button = next(button for button in app.button if str(button.key).startswith("open_"))
         movie_button.click().run()
@@ -106,6 +107,16 @@ class StreamlitAppTests(unittest.TestCase):
         app.button(key="open_tt0803096").click().run()
         app.button(key="back_to_library").click().run()
         self.assertEqual(app.text_input(key="movie_search").value, "Warcraft")
+
+    def test_search_changes_reset_one_persisted_pagination_value(self) -> None:
+        app = AppTest.from_file(str(ROOT / "app.py"), default_timeout=15).run()
+        app.get_by_key("library_page").set_value(3).run()
+        for query in ["a", "e", "Action", "Drama", "no-such-movie", ""]:
+            app.text_input(key="movie_search").set_value(query).run()
+            self.assertFalse(app.exception)
+            self.assertEqual(app.session_state["library_page"], 1)
+        page_keys = {key for key in app.session_state.keys() if str(key).startswith("library_page")}
+        self.assertEqual(page_keys, {"library_page", "library_page_query"})
 
     def test_review_draft_survives_views_and_movie_navigation(self) -> None:
         app = self.open_movie()

@@ -62,9 +62,12 @@ def hero_background() -> str:
     )
 
 
-def open_movie(movie_id: str, view: str = "Reviews") -> None:
+def open_movie(movie_id: str, view: str | None = None) -> None:
     st.session_state.selected_movie_id = movie_id
-    st.session_state[f"detail_view_{movie_id}"] = view
+    if view is None:
+        st.session_state.setdefault(f"detail_view_{movie_id}", "Reviews")
+    else:
+        st.session_state[f"detail_view_{movie_id}"] = view
     st.switch_page(MOVIE_PAGES[movie_id], query_params={})
 
 
@@ -158,6 +161,10 @@ def render_library(movies: list[Movie], reviews_by_movie: dict[str, tuple[Review
             if st.button("Add a Review", key="hero_add_review", type="primary"):
                 choose_review_movie(movies)
     normalized_query = query.strip().casefold()
+    # Persist one current-query page value, not a growing key for every search.
+    if st.session_state.get("library_page_query") != normalized_query:
+        st.session_state.library_page = 1
+        st.session_state.library_page_query = normalized_query
     filtered = [
         movie for movie in movies
         if not normalized_query
@@ -172,12 +179,11 @@ def render_library(movies: list[Movie], reviews_by_movie: dict[str, tuple[Review
         return
 
     total_pages = math.ceil(len(filtered) / MOVIES_PER_PAGE)
-    query_digest = hashlib.sha1(normalized_query.encode("utf-8")).hexdigest()[:10]
     listing = st.container(key="listing")
     page = 1
     if total_pages > 1:
         with st.container(key="library_pagination", width="content"):
-            page = st.pagination(total_pages, key=f"library_page_{query_digest}", width="content",
+            page = st.pagination(total_pages, key="library_page", width="content",
                                  persist_state="session")
 
     start = (page - 1) * MOVIES_PER_PAGE
